@@ -3,11 +3,13 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class QRScannerPage extends StatefulWidget {
+  const QRScannerPage({super.key}); // Constructor con `const` obligatorio
+
   @override
-  _QRScannerPageState createState() => _QRScannerPageState();
+  QRScannerPageState createState() => QRScannerPageState();
 }
 
-class _QRScannerPageState extends State<QRScannerPage> {
+class QRScannerPageState extends State<QRScannerPage> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? controller;
   String? qrResult;
@@ -40,7 +42,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Escanear QR')),
+      appBar: AppBar(title: const Text('Escanear QR')),
       body: _permissionGranted
           ? Column(
               children: [
@@ -59,7 +61,7 @@ class _QRScannerPageState extends State<QRScannerPage> {
                 ),
               ],
             )
-          : Center(
+          : const Center(
               child: Text('Se requiere permiso de cámara para escanear.'),
             ),
     );
@@ -67,14 +69,40 @@ class _QRScannerPageState extends State<QRScannerPage> {
 
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;
-    controller.scannedDataStream.listen((scanData) {
-      if (qrResult == null) {
-        setState(() {
-          qrResult = scanData.code;
-        });
-        controller.pauseCamera();
-      }
+controller.scannedDataStream.listen((scanData) {
+  if (qrResult == null && mounted) {
+    setState(() {
+      qrResult = scanData.code;
     });
+
+    controller.pauseCamera();
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Código QR Escaneado'),
+        content: Text(scanData.code ?? 'Sin datos'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              controller.resumeCamera();
+            },
+            child: const Text('Escanear otro'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context); // Volver a pantalla anterior
+            },
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+});
+
   }
 
   @override
