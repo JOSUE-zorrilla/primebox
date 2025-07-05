@@ -1,0 +1,182 @@
+{
+  "project_info": {
+    "project_number": "142773017257",
+    "firebase_url": "https://bluebox-2b62f-default-rtdb.firebaseio.com",
+    "project_id": "bluebox-2b62f",
+    "storage_bucket": "bluebox-2b62f.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:42a9701c390d45764227b8",
+        "android_client_info": {
+          "package_name": "admi.bluebox.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:95dfa10c8804a7364227b8",
+        "android_client_info": {
+          "package_name": "admi.primebox.mx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:7443af2122ad47584227b8",
+        "android_client_info": {
+          "package_name": "almacen.primebox.mx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:718d42192cb64fdb4227b8",
+        "android_client_info": {
+          "package_name": "com.appconductores"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:c8bf7bb3c5b3d2954227b8",
+        "android_client_info": {
+          "package_name": "com.primebox.appconductorReact"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:f25ceae84e7dcca94227b8",
+        "android_client_info": {
+          "package_name": "delivery.bluebox.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:e5416180d1a80e174227b8",
+        "android_client_info": {
+          "package_name": "driver.primebox.mx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:835d6b907071b38b4227b8",
+        "android_client_info": {
+          "package_name": "proveedores.primebox.mx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:142773017257:android:d70fcf487938a4e54227b8",
+        "android_client_info": {
+          "package_name": "soporte.primebox.mx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMmB05k3e87HvzBBIcF-k7nY9LHrjwPMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

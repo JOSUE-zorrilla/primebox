@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.escanear_qr"
+    namespace = "com.appconductores"
     compileSdk = 34 // ✅ Asegura que esté en al menos 33 o superior
 
     ndkVersion = "27.0.12077973"
@@ -22,7 +22,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.escanear_qr"
+        applicationId = "com.appconductores"
 
         // ✅ Asegúrate de estas versiones:
         minSdk = 21
@@ -46,3 +46,5 @@ flutter {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
+
+apply(plugin = "com.google.gms.google-services")

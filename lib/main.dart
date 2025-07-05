@@ -1,10 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'login_page.dart';
-import 'qr_scanner_page.dart'; // asumo que esta es tu pantalla principal luego del login
+import 'qr_scanner_page.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    await Firebase.initializeApp();
+    runApp(const MyApp());
+  } catch (e) {
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Text('🔥 Error al inicializar Firebase:\n$e'),
+          ),
+        ),
+      ),
+    );
+  }
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});

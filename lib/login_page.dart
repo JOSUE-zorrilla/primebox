@@ -1,7 +1,41 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-class LoginPage extends StatelessWidget {
+class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+  bool loading = false;
+
+  Future<void> _login() async {
+    setState(() => loading = true);
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: emailController.text.trim(),
+        password: passwordController.text.trim(),
+      );
+      // Login correcto
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/qr');
+      }
+    } on FirebaseAuthException catch (e) {
+      String message = 'Error al iniciar sesión';
+      if (e.code == 'user-not-found') message = 'Usuario no encontrado';
+      if (e.code == 'wrong-password') message = 'Contraseña incorrecta';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      setState(() => loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -13,14 +47,8 @@ class LoginPage extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo
-                Image.asset(
-                  'assets/images/primebox_logo.png',
-                  height: 150,
-                ),
+                Image.asset('assets/images/primebox_logo.png', height: 150),
                 const SizedBox(height: 20),
-
-                // Título
                 const Text(
                   'Iniciar Sesión',
                   style: TextStyle(
@@ -31,59 +59,52 @@ class LoginPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 30),
 
-                // Correo
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('Correo electrónico'),
                 ),
-                const TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Ingrese su correo aqui...',
+                TextField(
+                  controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    hintText: 'Ingrese su correo aquí...',
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 20),
 
-                // Contraseña
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('Contraseña'),
                 ),
-                const TextField(
+                TextField(
+                  controller: passwordController,
                   obscureText: true,
-                  decoration: InputDecoration(
-                    hintText: '•••',
+                  decoration: const InputDecoration(
+                    hintText: '••••••',
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 30),
 
-                // Botón
                 SizedBox(
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pushReplacementNamed(context, '/qr');
-                    },
+                    onPressed: loading ? null : _login,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1A3365),
-                      foregroundColor: Colors.white, // 👈 aquí defines el color del texto
+                      foregroundColor: Colors.white,
                     ),
-                    child: const Text(
-                      'ENTRAR',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: loading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            'ENTRAR',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                   ),
                 ),
-
                 const SizedBox(height: 40),
-
-
-
-                // Pie de página
                 const Text(
                   '© 2025 Desarrollado por Orionix.mx',
                   style: TextStyle(color: Colors.grey),
