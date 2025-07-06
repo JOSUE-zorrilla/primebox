@@ -22,7 +22,8 @@ class _LoginPageState extends State<LoginPage> {
       );
       // Login correcto
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/qr');
+        Navigator.pushReplacementNamed(context, '/paquetes');
+
       }
     } on FirebaseAuthException catch (e) {
       String message = 'Error al iniciar sesión';
@@ -117,3 +118,4 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
+

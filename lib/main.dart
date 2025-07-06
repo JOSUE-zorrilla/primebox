@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'login_page.dart';
 import 'qr_scanner_page.dart';
+import 'paquetes_page.dart'; // ✅ Importar la nueva pantalla
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +23,6 @@ void main() async {
   }
 }
 
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -38,6 +38,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const LoginPage(),
         '/qr': (context) => const QRScannerPage(),
+        '/paquetes': (context) => const PaquetesPage(), // ✅ Ruta nueva
       },
     );
   }
