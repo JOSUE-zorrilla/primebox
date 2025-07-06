@@ -33,7 +33,7 @@ dependencies:
     sdk: flutter
   qr_code_scanner: ^1.0.1
   permission_handler: ^11.4.0
-  firebase_core: ^2.25.0
+  firebase_core: ^2.30.0
   firebase_auth: ^4.17.3
   firebase_database: ^10.4.3
   firebase_storage: ^11.5.3
