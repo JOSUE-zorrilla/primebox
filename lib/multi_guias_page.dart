@@ -12,7 +12,8 @@ class MultiGuiasPage extends StatefulWidget {
 class _MultiGuiasPageState extends State<MultiGuiasPage> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? controller;
-  List<String> guias = [];
+  final List<String> guias = [];
+  final TextEditingController _manualController = TextEditingController();
   bool _permissionGranted = false;
 
   @override
@@ -40,14 +41,30 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
         setState(() {
           guias.add(code);
         });
-        // No pausamos ni mostramos diálogo
       }
+    });
+  }
+
+  void _agregarGuiaManual() {
+    final texto = _manualController.text.trim();
+    if (texto.isNotEmpty && !guias.contains(texto)) {
+      setState(() {
+        guias.add(texto);
+        _manualController.clear();
+      });
+    }
+  }
+
+  void _eliminarGuia(String id) {
+    setState(() {
+      guias.remove(id);
     });
   }
 
   @override
   void dispose() {
     controller?.dispose();
+    _manualController.dispose();
     super.dispose();
   }
 
@@ -57,7 +74,7 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MultiGuias'),
+        title: const Text('MultiGuías'),
         backgroundColor: const Color(0xFF1A3365),
         foregroundColor: Colors.white,
       ),
@@ -73,12 +90,41 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
+
+                // Campo para ingreso manual
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _manualController,
+                          decoration: const InputDecoration(
+                            hintText: 'Ingresar ID manualmente',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _agregarGuiaManual,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                        ),
+                        child: const Icon(Icons.add, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+
                 const Text(
                   '📋 Guías escaneadas:',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
-                // Lista de códigos QR
+
+                // Lista de guías
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -87,10 +133,15 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                       child: ListTile(
                         leading: const Icon(Icons.qr_code),
                         title: Text(guias[index]),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _eliminarGuia(guias[index]),
+                        ),
                       ),
                     ),
                   ),
                 ),
+
                 // Botón Siguiente
                 Padding(
                   padding: const EdgeInsets.all(16),
@@ -99,13 +150,19 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                     child: ElevatedButton(
                       onPressed: () {
                         // Aquí puedes enviar las guías a Firebase u otra pantalla
-                        Navigator.pop(context); // Por ahora, solo regresar
+                        Navigator.pop(context);
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         padding: const EdgeInsets.all(16),
                       ),
-                      child: const Text('Siguiente'),
+                      child: const Text(
+                        'Siguiente',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ),

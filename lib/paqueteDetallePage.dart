@@ -6,7 +6,6 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'multi_guias_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-
 class PaqueteDetallePage extends StatefulWidget {
   final String id;
   final String telefono;
@@ -42,98 +41,106 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   final List<File?> _imagenes = [null, null, null];
 
   void _llamar() async {
-    final uri = Uri.parse('tel:${widget.telefono}');
+    final uri = Uri(scheme: 'tel', path: widget.telefono);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir la app de llamadas')),
+      );
     }
   }
 
   void _enviarWhatsApp() async {
-    final uri = Uri.parse('https://wa.me/${widget.telefono}');
+    final mensaje = 'Hola, te saludamos de Primebox Driver';
+    final telefono = widget.telefono.replaceAll('+', '').replaceAll(' ', '');
+    final uri = Uri.parse('https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
+
     if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir WhatsApp')),
+      );
     }
   }
- Future<void> _seleccionarImagen(int index) async {
-  final picker = ImagePicker();
 
-  showModalBottomSheet(
-    context: context,
-    builder: (_) => SafeArea(
-      child: Wrap(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.photo_library),
-            title: const Text('Seleccionar de galería'),
-            onTap: () async {
-              Navigator.pop(context);
+  Future<void> _seleccionarImagen(int index) async {
+    final picker = ImagePicker();
 
-              final status = await Permission.storage.request();
-              if (status.isGranted) {
-                final picked = await picker.pickImage(source: ImageSource.gallery);
-                if (picked != null) {
-                  setState(() {
-                    _imagenes[index] = File(picked.path);
-                  });
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Seleccionar de galería'),
+              onTap: () async {
+                Navigator.pop(context);
+                final status = await Permission.storage.request();
+                if (status.isGranted) {
+                  final picked = await picker.pickImage(source: ImageSource.gallery);
+                  if (picked != null) {
+                    setState(() {
+                      _imagenes[index] = File(picked.path);
+                    });
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Permiso denegado para acceder a la galería.')),
+                  );
                 }
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Permiso denegado para acceder a la galería.')),
-                );
-              }
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.camera_alt),
-            title: const Text('Tomar foto'),
-            onTap: () async {
-              Navigator.pop(context);
-
-              final status = await Permission.camera.request();
-              if (status.isGranted) {
-                final picked = await picker.pickImage(source: ImageSource.camera);
-                if (picked != null) {
-                  setState(() {
-                    _imagenes[index] = File(picked.path);
-                  });
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Tomar foto'),
+              onTap: () async {
+                Navigator.pop(context);
+                final status = await Permission.camera.request();
+                if (status.isGranted) {
+                  final picked = await picker.pickImage(source: ImageSource.camera);
+                  if (picked != null) {
+                    setState(() {
+                      _imagenes[index] = File(picked.path);
+                    });
+                  }
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Permiso denegado para acceder a la cámara.')),
+                  );
                 }
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Permiso denegado para acceder a la cámara.')),
-                );
-              }
-            },
-          ),
-        ],
+              },
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
-
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-appBar: AppBar(
-  title: const Text('Detalle del Paquete'),
-  backgroundColor: const Color(0xFF1A3365),
-  foregroundColor: Colors.white,
-  actions: [
-    TextButton(
-      onPressed: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
-        );
-      },
-      child: const Text(
-        'MultiGuía',
-        style: TextStyle(color: Colors.white),
+      appBar: AppBar(
+        title: const Text('Detalle del Paquete'),
+        backgroundColor: const Color(0xFF1A3365),
+        foregroundColor: Colors.white,
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
+              );
+            },
+            child: const Text(
+              'MultiGuía',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
       ),
-    ),
-  ],
-),
-
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
@@ -221,11 +228,9 @@ appBar: AppBar(
                 border: OutlineInputBorder(),
               ),
             ),
-           
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
-                // Aquí puedes agregar lógica de guardado o confirmación
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -233,7 +238,6 @@ appBar: AppBar(
                 'Cerrar sin firma',
                 style: TextStyle(color: Colors.white),
               ),
-
             ),
           ],
         ),
