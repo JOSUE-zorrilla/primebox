@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'paqueteDetallePage.dart'; 
+
 
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
@@ -91,15 +93,35 @@ class _PaquetesPageState extends State<PaquetesPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                ElevatedButton(
-                                  onPressed: () {
-                                    // Acción aceptar
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                  ),
-                                  child: const Text('Aceptar'),
-                                ),
+                             ElevatedButton(
+                                onPressed: () async {
+                                  final user = FirebaseAuth.instance.currentUser;
+                                  if (user == null) return;
+
+                                  // Leer el TnReference desde la raíz del paquete
+                                  final DatabaseReference tnRef = FirebaseDatabase.instance.ref(
+                                    'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}',
+                                  );
+
+                                  final tnSnapshot = await tnRef.child(paquete['id']).get();
+                                  final tnReference = tnSnapshot.child('TnReference').value ?? 'Sin referencia';
+
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => PaqueteDetallePage(
+                                        id: paquete['id'],
+                                        telefono: tnSnapshot.child('Telefono').value?.toString() ?? '',
+                                        destinatario: paquete['Destinatario'],
+                                        tnReference: tnReference.toString(),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                                child: const Text('Aceptar'),
+                              ),
+
                                 const SizedBox(width: 10),
                                 ElevatedButton(
                                   onPressed: () {
