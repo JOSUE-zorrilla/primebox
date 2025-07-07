@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'multi_guias_page.dart'; 
 
 
 class PaqueteDetallePage extends StatefulWidget {
@@ -109,6 +110,18 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 });
               },
             ),
+            const SizedBox(height: 30),
+ElevatedButton(
+  onPressed: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
+    );
+  },
+  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+  child: const Text('MultiGuias'),
+),
+
           ],
         ),
       ),
