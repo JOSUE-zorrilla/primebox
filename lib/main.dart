@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'login_page.dart';
 import 'qr_scanner_page.dart';
-import 'paquetes_page.dart'; // ✅ Importar la nueva pantalla
+import 'paquetes_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,11 +34,11 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      initialRoute: '/',
+      initialRoute: '/login', // ✅ más claro
       routes: {
-        '/': (context) => const LoginPage(),
+        '/login': (context) => const LoginPage(), // ✅ explícito
         '/qr': (context) => const QRScannerPage(),
-        '/paquetes': (context) => const PaquetesPage(), // ✅ Ruta nueva
+        '/paquetes': (context) => const PaquetesPage(),
       },
     );
   }

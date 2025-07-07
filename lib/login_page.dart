@@ -17,6 +17,35 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController passwordController = TextEditingController();
   bool loading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _verificarSesionIniciada();
+  }
+
+  Future<void> _verificarSesionIniciada() async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user != null) {
+      final uid = user.uid;
+
+      final DatabaseReference ref = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
+      );
+
+      final snapshot = await ref.get();
+
+      if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
+        globalUserId = uid;
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/paquetes');
+        }
+      } else {
+        await FirebaseAuth.instance.signOut();
+      }
+    }
+  }
+
   Future<void> _login() async {
     setState(() => loading = true);
 
@@ -29,7 +58,6 @@ class _LoginPageState extends State<LoginPage> {
       final uid = credential.user?.uid;
       if (uid == null) throw Exception('UID no encontrado');
 
-      // Verificar el campo TipoPerfil en la base de datos
       final DatabaseReference ref = FirebaseDatabase.instance.ref(
         'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
       );
@@ -37,16 +65,13 @@ class _LoginPageState extends State<LoginPage> {
       final snapshot = await ref.get();
 
       if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
-        // ✅ Usuario autorizado
         globalUserId = uid;
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/paquetes');
         }
       } else {
-        // ❌ No autorizado
         await FirebaseAuth.instance.signOut();
-
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Este usuario no está autorizado')),
         );
