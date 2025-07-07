@@ -90,50 +90,61 @@ class _PaquetesPageState extends State<PaquetesPage> {
                             Text('👤 Destinatario: ${paquete['Destinatario']}'),
                             Text('📦 Intentos: ${paquete['Intentos']}'),
                             const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                             ElevatedButton(
-                                onPressed: () async {
-                                  final user = FirebaseAuth.instance.currentUser;
-                                  if (user == null) return;
-
-                                  // Leer el TnReference desde la raíz del paquete
-                                  final DatabaseReference tnRef = FirebaseDatabase.instance.ref(
-                                    'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}',
-                                  );
-
-                                  final tnSnapshot = await tnRef.child(paquete['id']).get();
-                                  final tnReference = tnSnapshot.child('TnReference').value ?? 'Sin referencia';
-
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => PaqueteDetallePage(
-                                        id: paquete['id'],
-                                        telefono: tnSnapshot.child('Telefono').value?.toString() ?? '',
-                                        destinatario: paquete['Destinatario'],
-                                        tnReference: tnReference.toString(),
-                                      ),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  // Botón Rechazar a la izquierda
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      // Acción rechazar
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.white,
+                                      side: const BorderSide(color: Colors.black),
                                     ),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                child: const Text('Aceptar'),
+                                    child: const Text(
+                                      'Rechazar',
+                                      style: TextStyle(color: Colors.black),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  // Botón Aceptar a la derecha
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      final user = FirebaseAuth.instance.currentUser;
+                                      if (user == null) return;
+
+                                      final DatabaseReference tnRef = FirebaseDatabase.instance.ref(
+                                        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}',
+                                      );
+
+                                      final tnSnapshot = await tnRef.child(paquete['id']).get();
+                                      final tnReference = tnSnapshot.child('TnReference').value ?? 'Sin referencia';
+
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => PaqueteDetallePage(
+                                            id: paquete['id'],
+                                            telefono: tnSnapshot.child('Telefono').value?.toString() ?? '',
+                                            destinatario: paquete['Destinatario'],
+                                            tnReference: tnReference.toString(),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                    ),
+                                    child: const Text(
+                                      'Aceptar',
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ],
                               ),
 
-                                const SizedBox(width: 10),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    // Acción rechazar
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                  ),
-                                  child: const Text('Rechazar'),
-                                ),
-                              ],
-                            )
+
                           ],
                         ),
                       ),

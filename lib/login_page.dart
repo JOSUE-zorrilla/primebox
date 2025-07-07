@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
+
+// ✅ Variable global para guardar UID
+String? globalUserId;
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -15,15 +19,37 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _login() async {
     setState(() => loading = true);
+
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
-      // Login correcto
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/paquetes');
 
+      final uid = credential.user?.uid;
+      if (uid == null) throw Exception('UID no encontrado');
+
+      // Verificar el campo TipoPerfil en la base de datos
+      final DatabaseReference ref = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
+      );
+
+      final snapshot = await ref.get();
+
+      if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
+        // ✅ Usuario autorizado
+        globalUserId = uid;
+
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/paquetes');
+        }
+      } else {
+        // ❌ No autorizado
+        await FirebaseAuth.instance.signOut();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Este usuario no está autorizado')),
+        );
       }
     } on FirebaseAuthException catch (e) {
       String message = 'Error al iniciar sesión';
@@ -32,6 +58,10 @@ class _LoginPageState extends State<LoginPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error de conexión o datos inválidos')),
       );
     } finally {
       setState(() => loading = false);
@@ -59,7 +89,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 30),
-
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('Correo electrónico'),
@@ -73,7 +102,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('Contraseña'),
@@ -87,7 +115,6 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 30),
-
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -118,4 +145,3 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
-

@@ -114,11 +114,26 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detalle del Paquete'),
-        backgroundColor: const Color(0xFF1A3365),
-        foregroundColor: Colors.white,
+appBar: AppBar(
+  title: const Text('Detalle del Paquete'),
+  backgroundColor: const Color(0xFF1A3365),
+  foregroundColor: Colors.white,
+  actions: [
+    TextButton(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
+        );
+      },
+      child: const Text(
+        'MultiGuía',
+        style: TextStyle(color: Colors.white),
       ),
+    ),
+  ],
+),
+
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
@@ -206,17 +221,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
-                );
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-              child: const Text('MultiGuias'),
-            ),
+           
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
@@ -224,7 +229,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text('Cerrar sin firma'),
+              child: const Text(
+                'Cerrar sin firma',
+                style: TextStyle(color: Colors.white),
+              ),
+
             ),
           ],
         ),
