@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'multi_guias_page.dart'; 
+import 'multi_guias_page.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 
 class PaqueteDetallePage extends StatefulWidget {
@@ -24,6 +27,7 @@ class PaqueteDetallePage extends StatefulWidget {
 
 class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   final TextEditingController _quienRecibeController = TextEditingController();
+  final TextEditingController _notaController = TextEditingController();
   String _opcionSeleccionada = 'Titular';
 
   final List<String> _opciones = [
@@ -34,6 +38,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     'Vigilante',
     'Otro',
   ];
+
+  final List<File?> _imagenes = [null, null, null];
 
   void _llamar() async {
     final uri = Uri.parse('tel:${widget.telefono}');
@@ -48,6 +54,62 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       await launchUrl(uri);
     }
   }
+ Future<void> _seleccionarImagen(int index) async {
+  final picker = ImagePicker();
+
+  showModalBottomSheet(
+    context: context,
+    builder: (_) => SafeArea(
+      child: Wrap(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library),
+            title: const Text('Seleccionar de galería'),
+            onTap: () async {
+              Navigator.pop(context);
+
+              final status = await Permission.storage.request();
+              if (status.isGranted) {
+                final picked = await picker.pickImage(source: ImageSource.gallery);
+                if (picked != null) {
+                  setState(() {
+                    _imagenes[index] = File(picked.path);
+                  });
+                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Permiso denegado para acceder a la galería.')),
+                );
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.camera_alt),
+            title: const Text('Tomar foto'),
+            onTap: () async {
+              Navigator.pop(context);
+
+              final status = await Permission.camera.request();
+              if (status.isGranted) {
+                final picked = await picker.pickImage(source: ImageSource.camera);
+                if (picked != null) {
+                  setState(() {
+                    _imagenes[index] = File(picked.path);
+                  });
+                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Permiso denegado para acceder a la cámara.')),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +136,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                   icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green),
                   onPressed: _enviarWhatsApp,
                 ),
-
               ],
             ),
             const SizedBox(height: 12),
@@ -110,18 +171,61 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 });
               },
             ),
+            const SizedBox(height: 20),
+            const Text('📷 Fotografías:',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: List.generate(3, (index) {
+                return GestureDetector(
+                  onTap: () => _seleccionarImagen(index),
+                  child: Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      color: Colors.grey[200],
+                    ),
+                    child: _imagenes[index] != null
+                        ? Image.file(_imagenes[index]!, fit: BoxFit.cover)
+                        : const Icon(Icons.add_a_photo, size: 30),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 20),
+            const Text('📝 Agregar alguna nota (opcional):',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _notaController,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: 'Escribe tus observaciones...',
+                border: OutlineInputBorder(),
+              ),
+            ),
             const SizedBox(height: 30),
-ElevatedButton(
-  onPressed: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
-    );
-  },
-  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-  child: const Text('MultiGuias'),
-),
-
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
+                );
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+              child: const Text('MultiGuias'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                // Aquí puedes agregar lógica de guardado o confirmación
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Cerrar sin firma'),
+            ),
           ],
         ),
       ),

@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.appconductores"
-    compileSdk = 34 // ✅ Asegura que esté en al menos 33 o superior
+    compileSdk = 35 // ✅ Asegura que esté en al menos 33 o superior
 
     ndkVersion = "27.0.12077973"
 
@@ -26,7 +26,7 @@ android {
 
         // ✅ Asegúrate de estas versiones:
         minSdk = 21
-        targetSdk = 34 // >= 33 para permisos modernos
+        targetSdk = 35 // >= 33 para permisos modernos
 
         versionCode = flutter.versionCode
         versionName = flutter.versionName
