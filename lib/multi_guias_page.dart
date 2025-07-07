@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 class MultiGuiasPage extends StatefulWidget {
   const MultiGuiasPage({super.key});
@@ -37,21 +39,43 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
     this.controller = controller;
     controller.scannedDataStream.listen((scanData) {
       final code = scanData.code ?? '';
-      if (!guias.contains(code)) {
-        setState(() {
-          guias.add(code);
-        });
-      }
+      _validarYAgregarGuia(code);
     });
+  }
+
+  Future<void> _validarYAgregarGuia(String id) async {
+    if (guias.contains(id)) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$id',
+    );
+
+    final snapshot = await ref.get();
+
+    if (snapshot.exists) {
+      setState(() {
+        guias.add(id);
+      });
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Paquete no asignado'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _agregarGuiaManual() {
     final texto = _manualController.text.trim();
-    if (texto.isNotEmpty && !guias.contains(texto)) {
-      setState(() {
-        guias.add(texto);
-        _manualController.clear();
-      });
+    if (texto.isNotEmpty) {
+      _validarYAgregarGuia(texto);
+      _manualController.clear();
     }
   }
 
@@ -81,7 +105,7 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
       body: _permissionGranted
           ? Column(
               children: [
-                // Escáner en 25% superior
+                // Escáner QR
                 SizedBox(
                   height: screenHeight * 0.25,
                   child: QRView(
@@ -91,7 +115,7 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                 ),
                 const SizedBox(height: 10),
 
-                // Campo para ingreso manual
+                // Campo de ingreso manual
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
@@ -149,8 +173,7 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        // Aquí puedes enviar las guías a Firebase u otra pantalla
-                        Navigator.pop(context);
+                        Navigator.pop(context); // Por ahora solo cerrar
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
