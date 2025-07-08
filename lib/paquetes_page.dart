@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'paqueteDetallePage.dart';
+import 'entrega_fallida_page.dart';
+
 
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
@@ -128,20 +130,45 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                     ),
                                   ),
 
-                                // Botón Rechazar
                                 ElevatedButton(
-                                  onPressed: () {
-                                    // Acción rechazar
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.white,
-                                    side: const BorderSide(color: Colors.black),
-                                  ),
-                                  child: const Text(
-                                    'Rechazar',
-                                    style: TextStyle(color: Colors.black),
-                                  ),
-                                ),
+  onPressed: () async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final paqueteId = paquete['id'];
+
+    // Ruta hacia el nodo del paquete específico
+    final DatabaseReference paqueteRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
+    );
+
+    final snapshot = await paqueteRef.get();
+
+    final tnReference = snapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
+    final telefono = snapshot.child('Telefono').value?.toString() ?? '';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EntregaFallidaPage(
+          telefono: telefono,
+          tnReference: tnReference,
+          destinatario: paquete['Destinatario'],
+        ),
+      ),
+    );
+  },
+  style: ElevatedButton.styleFrom(
+    backgroundColor: Colors.white,
+    side: const BorderSide(color: Colors.black),
+  ),
+  child: const Text(
+    'Rechazar',
+    style: TextStyle(color: Colors.black),
+  ),
+),
+
+
                                 const SizedBox(width: 10),
 
                                 // Botón Aceptar
