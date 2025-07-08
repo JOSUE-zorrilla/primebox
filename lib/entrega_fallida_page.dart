@@ -4,6 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'fallidas_multientrega_page.dart';
+
 
 class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
@@ -104,10 +106,25 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Entrega Fallida'),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+  title: const Text('Entrega Fallida'),
+  backgroundColor: Colors.red,
+  foregroundColor: Colors.white,
+  actions: [
+    TextButton(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const FallidasMultiEntregaPage()),
+        );
+      },
+      child: const Text(
+        'MultiEntrega',
+        style: TextStyle(color: Colors.white),
       ),
+    ),
+  ],
+),
+
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
