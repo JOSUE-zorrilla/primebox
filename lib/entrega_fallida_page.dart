@@ -1,11 +1,14 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'fallidas_multientrega_page.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
+import 'fallidas_multientrega_page.dart';
 
 class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
@@ -26,8 +29,8 @@ class EntregaFallidaPage extends StatefulWidget {
 class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   final TextEditingController _notaController = TextEditingController();
   final List<File?> _imagenes = [null];
-
   String _motivo = 'Titular ausente';
+  String? _direccionActual;
 
   final List<String> _motivos = [
     'Titular ausente',
@@ -38,6 +41,70 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
     'Extravío',
     'Otro',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _obtenerUbicacionYDireccion();
+  }
+
+  Future<void> _obtenerUbicacionYDireccion() async {
+    final status = await Permission.location.request();
+
+    if (status.isGranted) {
+      bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+      if (!servicioActivo) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Activa el GPS del dispositivo.')),
+        );
+        return;
+      }
+
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+
+        await _obtenerDireccionDesdeCoordenadas(position.latitude, position.longitude);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al obtener ubicación: $e')),
+        );
+      }
+    } else if (status.isPermanentlyDenied) {
+      openAppSettings();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permiso de ubicación denegado')),
+      );
+    }
+  }
+
+  Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
+    const apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
+    final url =
+        'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
+
+    final response = await http.get(Uri.parse(url));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      if (data['results'] != null && data['results'].isNotEmpty) {
+        final direccion = data['results'][0]['formatted_address'];
+        setState(() {
+          _direccionActual = direccion;
+        });
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo obtener la dirección')),
+      );
+    }
+  }
 
   void _llamar() async {
     final uri = Uri(scheme: 'tel', path: widget.telefono);
@@ -69,7 +136,7 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
               title: const Text('Seleccionar de galería'),
               onTap: () async {
                 Navigator.pop(context);
-                final status = await Permission.storage.request();
+                final status = await Permission.photos.request();
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.gallery);
                   if (picked != null) {
@@ -106,25 +173,24 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-  title: const Text('Entrega Fallida'),
-  backgroundColor: Colors.red,
-  foregroundColor: Colors.white,
-  actions: [
-    TextButton(
-      onPressed: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const FallidasMultiEntregaPage()),
-        );
-      },
-      child: const Text(
-        'MultiEntrega',
-        style: TextStyle(color: Colors.white),
+        title: const Text('Entrega Fallida'),
+        backgroundColor: Colors.red,
+        foregroundColor: Colors.white,
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FallidasMultiEntregaPage()),
+              );
+            },
+            child: const Text(
+              'MultiEntrega',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
       ),
-    ),
-  ],
-),
-
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
@@ -145,8 +211,11 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
             const SizedBox(height: 12),
             Text('👤 Titular: ${widget.destinatario}'),
             Text('🔢 TnReference: ${widget.tnReference}'),
+            if (_direccionActual != null) ...[
+              const SizedBox(height: 12),
+              Text('📍 Dirección actual: $_direccionActual'),
+            ],
             const SizedBox(height: 20),
-
             const Text('Motivo de entrega fallida:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
@@ -159,7 +228,6 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 });
               },
             ),
-
             const SizedBox(height: 20),
             const Text('📷 Captura de evidencia fallida:',
                 style: TextStyle(fontWeight: FontWeight.bold)),
@@ -178,7 +246,6 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                     : const Icon(Icons.add_a_photo, size: 40),
               ),
             ),
-
             const SizedBox(height: 20),
             const Text('📝 Nota extra:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -190,11 +257,10 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 border: OutlineInputBorder(),
               ),
             ),
-
             const SizedBox(height: 30),
             ElevatedButton(
               onPressed: () {
-                // Guardar lógica aquí
+                // Aquí podrías guardar nota, motivo, dirección y fotos
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),

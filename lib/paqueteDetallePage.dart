@@ -1,10 +1,14 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'multi_guias_page.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+
+import 'multi_guias_page.dart';
 
 class PaqueteDetallePage extends StatefulWidget {
   final String id;
@@ -28,6 +32,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   final TextEditingController _quienRecibeController = TextEditingController();
   final TextEditingController _notaController = TextEditingController();
   String _opcionSeleccionada = 'Titular';
+  String? _direccionActual;
+  Position? _posicionActual;
 
   final List<String> _opciones = [
     'Titular',
@@ -40,14 +46,80 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
   final List<File?> _imagenes = [null, null, null];
 
+  @override
+  void initState() {
+    super.initState();
+    _obtenerUbicacion();
+  }
+
+  Future<void> _obtenerUbicacion() async {
+    final status = await Permission.location.request();
+
+    if (status.isGranted) {
+      bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+      if (!servicioActivo) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Por favor activa el GPS del dispositivo.')),
+        );
+        return;
+      }
+
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+
+        setState(() {
+          _posicionActual = position;
+        });
+
+        await _obtenerDireccionDesdeCoordenadas(position.latitude, position.longitude);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al obtener ubicación: $e')),
+        );
+      }
+    } else if (status.isPermanentlyDenied) {
+      openAppSettings();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Permiso de ubicación denegado permanentemente. Por favor habilítalo en ajustes.'),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permiso de ubicación denegado')),
+      );
+    }
+  }
+
+  Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
+    final apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
+    final url =
+        'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
+
+    final response = await http.get(Uri.parse(url));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      if (data['results'] != null && data['results'].isNotEmpty) {
+        final direccion = data['results'][0]['formatted_address'];
+        setState(() {
+          _direccionActual = direccion;
+        });
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo obtener dirección')),
+      );
+    }
+  }
+
   void _llamar() async {
     final uri = Uri(scheme: 'tel', path: widget.telefono);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir la app de llamadas')),
-      );
     }
   }
 
@@ -58,10 +130,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir WhatsApp')),
-      );
     }
   }
 
@@ -78,7 +146,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
               title: const Text('Seleccionar de galería'),
               onTap: () async {
                 Navigator.pop(context);
-                final status = await Permission.storage.request();
+                final status = await Permission.photos.request();
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.gallery);
                   if (picked != null) {
@@ -86,10 +154,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                       _imagenes[index] = File(picked.path);
                     });
                   }
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Permiso denegado para acceder a la galería.')),
-                  );
                 }
               },
             ),
@@ -106,10 +170,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                       _imagenes[index] = File(picked.path);
                     });
                   }
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Permiso denegado para acceder a la cámara.')),
-                  );
                 }
               },
             ),
@@ -163,6 +223,10 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
             const SizedBox(height: 12),
             Text('👤 Titular: ${widget.destinatario}'),
             Text('🔢 TnReference: ${widget.tnReference}'),
+            if (_direccionActual != null) ...[
+              const SizedBox(height: 12),
+              Text('📍 Dirección actual: $_direccionActual'),
+            ],
             const SizedBox(height: 20),
             const Text('¿Quién recibe el paquete?',
                 style: TextStyle(fontWeight: FontWeight.bold)),
