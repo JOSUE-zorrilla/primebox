@@ -89,6 +89,22 @@ class _PaquetesPageState extends State<PaquetesPage> {
     }
   }
 
+  void _mostrarAlertaDevolucion() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Paquete con múltiples intentos'),
+        content: const Text('Este paquete debe ser devuelto al proveedor.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Aceptar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -177,9 +193,22 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                             );
 
                                             final snapshot = await paqueteRef.get();
+
+                                            // Convertimos 'Intentos' a int de forma segura
+                                            final dynamic intentosRaw = snapshot.child('Intentos').value;
+                                            final int intentos = intentosRaw is int
+                                                ? intentosRaw
+                                                : int.tryParse(intentosRaw.toString()) ?? 0;
+
+                                            if (intentos >= 3) {
+                                              _mostrarAlertaDevolucion();
+                                              return;
+                                            }
+
                                             final tnReference = snapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
                                             final telefono = snapshot.child('Telefono').value?.toString() ?? '';
 
+                                            if (!mounted) return;
                                             Navigator.push(
                                               context,
                                               MaterialPageRoute(
@@ -191,6 +220,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                               ),
                                             );
                                           },
+
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.white,
                                             side: const BorderSide(color: Colors.black),
