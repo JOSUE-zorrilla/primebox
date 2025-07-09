@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
 
@@ -105,6 +108,44 @@ class _PaquetesPageState extends State<PaquetesPage> {
     );
   }
 
+  Future<void> _procesarNotificacionWebhook({
+    required String paqueteId,
+    required String tnReference,
+    required String notificarRp,
+    required String userId,
+  }) async {
+    final now = DateTime.now();
+    final fechaPush = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+    final fechaEstimada = DateFormat('yyyy-MM-dd HH:mm:ss').format(now.add(const Duration(hours: 8)));
+
+    final webhookUrl = Uri.parse('https://editor.apphive.io/hook/ccp_1ms7YSCLjYnYUQnJYPp2pp');
+
+    final Map<String, String> data = {
+      'Estatus': 'RP',
+      'FechaEstimada': fechaEstimada,
+      'FechaPush': fechaPush,
+      'idGuiaLP': tnReference,
+      'idGuiaPM': paqueteId,
+    };
+
+    if (notificarRp.toLowerCase() == 'si') {
+      await http.post(webhookUrl, body: data);
+
+      final ref = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/$userId/Paquetes/$paqueteId/NotificarRp',
+      );
+      await ref.remove();
+    } else {
+      final refCheck = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/PushLRP/$paqueteId',
+      );
+      final exists = await refCheck.get();
+      if (!exists.exists) {
+        await http.post(webhookUrl, body: data);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -188,14 +229,23 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                             if (user == null) return;
 
                                             final paqueteId = paquete['id'];
-                                            final DatabaseReference paqueteRef = FirebaseDatabase.instance.ref(
+                                            final paqueteRef = FirebaseDatabase.instance.ref(
                                               'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
                                             );
 
                                             final snapshot = await paqueteRef.get();
 
-                                            // Convertimos 'Intentos' a int de forma segura
-                                            final dynamic intentosRaw = snapshot.child('Intentos').value;
+                                            final tnReference = snapshot.child('TnReference').value?.toString() ?? '';
+                                            final notificarRp = snapshot.child('NotificarRp').value?.toString() ?? '';
+
+                                            await _procesarNotificacionWebhook(
+                                              paqueteId: paqueteId,
+                                              tnReference: tnReference,
+                                              notificarRp: notificarRp,
+                                              userId: user.uid,
+                                            );
+
+                                            final intentosRaw = snapshot.child('Intentos').value;
                                             final int intentos = intentosRaw is int
                                                 ? intentosRaw
                                                 : int.tryParse(intentosRaw.toString()) ?? 0;
@@ -205,7 +255,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                               return;
                                             }
 
-                                            final tnReference = snapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
                                             final telefono = snapshot.child('Telefono').value?.toString() ?? '';
 
                                             if (!mounted) return;
@@ -220,7 +269,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                               ),
                                             );
                                           },
-
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: Colors.white,
                                             side: const BorderSide(color: Colors.black),
