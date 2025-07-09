@@ -4,7 +4,6 @@ import 'package:firebase_database/firebase_database.dart';
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
 
-
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
 
@@ -14,12 +13,35 @@ class PaquetesPage extends StatefulWidget {
 
 class _PaquetesPageState extends State<PaquetesPage> {
   final List<Map<String, dynamic>> _paquetes = [];
+  List<Map<String, dynamic>> _paquetesFiltrados = [];
+  final TextEditingController _searchController = TextEditingController();
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(_filtrarPaquetes);
     _cargarPaquetes();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filtrarPaquetes() {
+    final query = _searchController.text.toLowerCase();
+    if (query.isEmpty) {
+      setState(() => _paquetesFiltrados = [..._paquetes]);
+    } else {
+      setState(() {
+        _paquetesFiltrados = _paquetes.where((paquete) {
+          final id = paquete['id'].toString().toLowerCase();
+          return id.contains(query);
+        }).toList();
+      });
+    }
   }
 
   Future<void> _cargarPaquetes() async {
@@ -49,11 +71,13 @@ class _PaquetesPageState extends State<PaquetesPage> {
       setState(() {
         _paquetes.clear();
         _paquetes.addAll(lista);
+        _paquetesFiltrados = [...lista];
         _loading = false;
       });
     } else {
       setState(() {
         _loading = false;
+        _paquetesFiltrados = [];
       });
     }
   }
@@ -84,137 +108,143 @@ class _PaquetesPageState extends State<PaquetesPage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _paquetes.isEmpty
-              ? const Center(child: Text('No hay paquetes disponibles'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _paquetes.length,
-                  itemBuilder: (context, index) {
-                    final paquete = _paquetes[index];
-                    final tipoEnvio = paquete['TipoEnvio'];
-                    final bool esEspecial = tipoEnvio == 'HD0D' || tipoEnvio == 'HD1D';
-
-                    return Card(
-                      elevation: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('🧾 Orden: ${paquete['id']}',
-                                style: const TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            Text('📍 Dirección: ${paquete['DireccionEntrega']}'),
-                            Text('👤 Destinatario: ${paquete['Destinatario']}'),
-                            Text('📦 Intentos: ${paquete['Intentos']}'),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                // Indicador de TipoEnvio a la izquierda
-                                if (esEspecial)
-                                  Container(
-                                    margin: const EdgeInsets.only(right: 10),
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.yellow[700],
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      tipoEnvio,
-                                      style: const TextStyle(
-                                        color: Colors.black,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-
-                                ElevatedButton(
-  onPressed: () async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final paqueteId = paquete['id'];
-
-    // Ruta hacia el nodo del paquete específico
-    final DatabaseReference paqueteRef = FirebaseDatabase.instance.ref(
-      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
-    );
-
-    final snapshot = await paqueteRef.get();
-
-    final tnReference = snapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
-    final telefono = snapshot.child('Telefono').value?.toString() ?? '';
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => EntregaFallidaPage(
-          telefono: telefono,
-          tnReference: tnReference,
-          destinatario: paquete['Destinatario'],
-        ),
-      ),
-    );
-  },
-  style: ElevatedButton.styleFrom(
-    backgroundColor: Colors.white,
-    side: const BorderSide(color: Colors.black),
-  ),
-  child: const Text(
-    'Rechazar',
-    style: TextStyle(color: Colors.black),
-  ),
-),
-
-
-                                const SizedBox(width: 10),
-
-                                // Botón Aceptar
-                                ElevatedButton(
-                                  onPressed: () async {
-                                    final user = FirebaseAuth.instance.currentUser;
-                                    if (user == null) return;
-
-                                    // Ruta corregida para acceder a los datos del paquete seleccionado
-                                    final DatabaseReference tnRef = FirebaseDatabase.instance.ref(
-                                      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/${paquete['id']}',
-                                    );
-
-                                    final tnSnapshot = await tnRef.get();
-
-                                    final tnReference = tnSnapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
-                                    final telefono = tnSnapshot.child('Telefono').value?.toString() ?? '';
-
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PaqueteDetallePage(
-                                          id: paquete['id'],
-                                          telefono: telefono,
-                                          destinatario: paquete['Destinatario'],
-                                          tnReference: tnReference,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                  ),
-                                  child: const Text(
-                                    'Aceptar',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: const InputDecoration(
+                      labelText: 'Buscar por ID',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
                 ),
+                Expanded(
+                  child: _paquetesFiltrados.isEmpty
+                      ? const Center(child: Text('No hay paquetes disponibles'))
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _paquetesFiltrados.length,
+                          itemBuilder: (context, index) {
+                            final paquete = _paquetesFiltrados[index];
+                            final tipoEnvio = paquete['TipoEnvio'];
+                            final bool esEspecial = tipoEnvio == 'HD0D' || tipoEnvio == 'HD1D';
+
+                            return Card(
+                              elevation: 4,
+                              margin: const EdgeInsets.only(bottom: 16),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('🧾 Orden: ${paquete['id']}',
+                                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 8),
+                                    Text('📍 Dirección: ${paquete['DireccionEntrega']}'),
+                                    Text('👤 Destinatario: ${paquete['Destinatario']}'),
+                                    Text('📦 Intentos: ${paquete['Intentos']}'),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        if (esEspecial)
+                                          Container(
+                                            margin: const EdgeInsets.only(right: 10),
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.yellow[700],
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              tipoEnvio,
+                                              style: const TextStyle(
+                                                color: Colors.black,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ElevatedButton(
+                                          onPressed: () async {
+                                            final user = FirebaseAuth.instance.currentUser;
+                                            if (user == null) return;
+
+                                            final paqueteId = paquete['id'];
+                                            final DatabaseReference paqueteRef = FirebaseDatabase.instance.ref(
+                                              'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
+                                            );
+
+                                            final snapshot = await paqueteRef.get();
+                                            final tnReference = snapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
+                                            final telefono = snapshot.child('Telefono').value?.toString() ?? '';
+
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => EntregaFallidaPage(
+                                                  telefono: telefono,
+                                                  tnReference: tnReference,
+                                                  destinatario: paquete['Destinatario'],
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.white,
+                                            side: const BorderSide(color: Colors.black),
+                                          ),
+                                          child: const Text(
+                                            'Rechazar',
+                                            style: TextStyle(color: Colors.black),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        ElevatedButton(
+                                          onPressed: () async {
+                                            final user = FirebaseAuth.instance.currentUser;
+                                            if (user == null) return;
+
+                                            final tnRef = FirebaseDatabase.instance.ref(
+                                              'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/${paquete['id']}',
+                                            );
+
+                                            final tnSnapshot = await tnRef.get();
+                                            final tnReference = tnSnapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
+                                            final telefono = tnSnapshot.child('Telefono').value?.toString() ?? '';
+
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => PaqueteDetallePage(
+                                                  id: paquete['id'],
+                                                  telefono: telefono,
+                                                  destinatario: paquete['Destinatario'],
+                                                  tnReference: tnReference,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.green,
+                                          ),
+                                          child: const Text(
+                                            'Aceptar',
+                                            style: TextStyle(color: Colors.white),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
     );
   }
 }
