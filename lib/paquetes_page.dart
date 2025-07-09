@@ -19,12 +19,13 @@ class _PaquetesPageState extends State<PaquetesPage> {
   List<Map<String, dynamic>> _paquetesFiltrados = [];
   final TextEditingController _searchController = TextEditingController();
   bool _loading = true;
+  String? _estadoConexion; // Para manejar el estado actual del conductor
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_filtrarPaquetes);
-    _cargarPaquetes();
+    _verificarEstadoConductor();
   }
 
   @override
@@ -45,6 +46,63 @@ class _PaquetesPageState extends State<PaquetesPage> {
         }).toList();
       });
     }
+  }
+
+  Future<void> _verificarEstadoConductor() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final conductorRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}',
+    );
+    final conductorSnapshot = await conductorRef.get();
+
+    if (!conductorSnapshot.exists) return;
+
+    final activo = conductorSnapshot.child('Activo').value?.toString() ?? 'No';
+    final estado = conductorSnapshot.child('EstadoConexion').value?.toString() ?? 'Desconectado';
+
+    if (activo.toLowerCase() != 'si') {
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Usuario inactivo'),
+          content: const Text('Este usuario no está activo en la plataforma.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.pushReplacementNamed(context, '/login');
+              },
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      setState(() {
+        _estadoConexion = estado;
+      });
+      _cargarPaquetes(); // Solo carga si está activo
+    }
+  }
+
+  Future<void> _alternarEstadoConexion() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _estadoConexion == null) return;
+
+    final nuevoEstado = _estadoConexion == 'Conectado' ? 'Desconectado' : 'Conectado';
+    final conductorRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}/EstadoConexion',
+    );
+
+    await conductorRef.set(nuevoEstado);
+
+    setState(() {
+      _estadoConexion = nuevoEstado;
+    });
   }
 
   Future<void> _cargarPaquetes() async {
@@ -148,6 +206,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bool conectado = _estadoConexion == 'Conectado';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mis Paquetes'),
@@ -156,10 +216,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
         actions: [
           TextButton(
             onPressed: _cerrarSesion,
-            child: const Text(
-              'Cerrar sesión',
-              style: TextStyle(color: Colors.white),
-            ),
+            child: const Text('Cerrar sesión', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -178,6 +235,20 @@ class _PaquetesPageState extends State<PaquetesPage> {
                     ),
                   ),
                 ),
+                if (_estadoConexion != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
+                    child: ElevatedButton(
+                      onPressed: _alternarEstadoConexion,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: conectado ? Colors.grey[400] : Colors.green,
+                      ),
+                      child: Text(
+                        conectado ? 'Desconectarse' : 'Conectarse',
+                        style: const TextStyle(color: Colors.black),
+                      ),
+                    ),
+                  ),
                 Expanded(
                   child: _paquetesFiltrados.isEmpty
                       ? const Center(child: Text('No hay paquetes disponibles'))
