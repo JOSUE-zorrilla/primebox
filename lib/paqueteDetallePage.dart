@@ -2,9 +2,9 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
@@ -45,6 +45,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   ];
 
   final List<File?> _imagenes = [null, null, null];
+  List<String> _guiasMulti = []; // Guías escaneadas desde MultiGuiasPage
 
   @override
   void initState() {
@@ -83,8 +84,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       openAppSettings();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-              'Permiso de ubicación denegado permanentemente. Por favor habilítalo en ajustes.'),
+          content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.'),
         ),
       );
     } else {
@@ -96,8 +96,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
   Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
     final apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
-    final url =
-        'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
+    final url = 'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
 
     final response = await http.get(Uri.parse(url));
 
@@ -188,11 +187,16 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         foregroundColor: Colors.white,
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              final resultado = await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
               );
+              if (resultado != null && resultado is List<String>) {
+                setState(() {
+                  _guiasMulti = resultado;
+                });
+              }
             },
             child: const Text(
               'MultiGuía',
@@ -207,9 +211,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           children: [
             Row(
               children: [
-                Expanded(
-                  child: Text('📞 Teléfono: ${widget.telefono}'),
-                ),
+                Expanded(child: Text('📞 Teléfono: ${widget.telefono}')),
                 IconButton(
                   icon: const Icon(Icons.phone, color: Colors.green),
                   onPressed: _llamar,
@@ -292,6 +294,20 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 border: OutlineInputBorder(),
               ),
             ),
+            if (_guiasMulti.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              const Text('📋 Guías asociadas:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Column(
+                children: _guiasMulti
+                    .map((id) => ListTile(
+                          leading: const Icon(Icons.qr_code),
+                          title: Text(id),
+                        ))
+                    .toList(),
+              ),
+            ],
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {

@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'perfil_page.dart';
+
 
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
@@ -62,31 +64,15 @@ class _PaquetesPageState extends State<PaquetesPage> {
     final activo = conductorSnapshot.child('Activo').value?.toString() ?? 'No';
     final estado = conductorSnapshot.child('EstadoConexion').value?.toString() ?? 'Desconectado';
 
-    if (activo.toLowerCase() != 'si') {
-      await FirebaseAuth.instance.signOut();
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Usuario inactivo'),
-          content: const Text('Este usuario no está activo en la plataforma.'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.pushReplacementNamed(context, '/login');
-              },
-              child: const Text('Aceptar'),
-            ),
-          ],
-        ),
-      );
-    } else {
-      setState(() {
-        _estadoConexion = estado;
-      });
-      _cargarPaquetes(); // Solo carga si está activo
-    }
+  if (activo.toLowerCase() != 'si') {
+  if (!mounted) return;
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const PerfilPage()),
+  );
+  return;
+}
+
   }
 
   Future<void> _alternarEstadoConexion() async {

@@ -105,7 +105,6 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
       body: _permissionGranted
           ? Column(
               children: [
-                // Escáner QR
                 SizedBox(
                   height: screenHeight * 0.25,
                   child: QRView(
@@ -114,8 +113,6 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-
-                // Campo de ingreso manual
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
@@ -141,14 +138,9 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-
-                const Text(
-                  '📋 Guías escaneadas:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                const Text('📋 Guías escaneadas:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
-
-                // Lista de guías
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -165,15 +157,13 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
                     ),
                   ),
                 ),
-
-                // Botón Siguiente
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        Navigator.pop(context); // Por ahora solo cerrar
+                        Navigator.pop(context, guias); // <-- retorna la lista
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
