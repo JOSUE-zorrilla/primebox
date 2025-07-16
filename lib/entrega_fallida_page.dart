@@ -7,6 +7,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path/path.dart' as path;
+
 
 import 'fallidas_multientrega_page.dart';
 
@@ -29,6 +32,8 @@ class EntregaFallidaPage extends StatefulWidget {
 class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   final TextEditingController _notaController = TextEditingController();
   final List<File?> _imagenes = [null];
+  String? _urlImagen;
+
   String _motivo = 'Titular ausente';
   String? _direccionActual;
 
@@ -83,6 +88,32 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       );
     }
   }
+
+  Future<void> _subirImagenAFirebase(File image) async {
+  try {
+    final fileName = path.basename(image.path);
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child('imagenesfallidas')
+        .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
+
+    final uploadTask = await ref.putFile(image);
+    final url = await ref.getDownloadURL();
+
+    setState(() {
+      _urlImagen = url;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Imagen subida correctamente')),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al subir imagen: $e')),
+    );
+  }
+}
+
 
   Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
     const apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
@@ -140,10 +171,13 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.gallery);
                   if (picked != null) {
+                    File imageFile = File(picked.path);
                     setState(() {
-                      _imagenes[0] = File(picked.path);
+                      _imagenes[0] = imageFile;
                     });
+                    await _subirImagenAFirebase(imageFile);
                   }
+
                 }
               },
             ),
@@ -156,10 +190,13 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.camera);
                   if (picked != null) {
-                    setState(() {
-                      _imagenes[0] = File(picked.path);
-                    });
-                  }
+                      File imageFile = File(picked.path);
+                      setState(() {
+                        _imagenes[0] = imageFile;
+                      });
+                      await _subirImagenAFirebase(imageFile);
+                    }
+
                 }
               },
             ),
@@ -260,7 +297,8 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
             const SizedBox(height: 30),
             ElevatedButton(
               onPressed: () {
-                // Aquí podrías guardar nota, motivo, dirección y fotos
+
+
                 Navigator.pop(context);
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
