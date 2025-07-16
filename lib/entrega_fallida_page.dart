@@ -9,6 +9,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
+import 'login_page.dart'; // ya lo estás haciendo 👍
+import 'package:firebase_database/firebase_database.dart';
+
+
 
 
 import 'fallidas_multientrega_page.dart';
@@ -17,6 +21,7 @@ class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
   final String tnReference;
   final String destinatario;
+  
 
   const EntregaFallidaPage({
     super.key,
@@ -33,6 +38,9 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   final TextEditingController _notaController = TextEditingController();
   final List<File?> _imagenes = [null];
   String? _urlImagen;
+  List<String> _guiasFallidas = [];
+  String? _idEmpresa;
+
 
   String _motivo = 'Titular ausente';
   String? _direccionActual;
@@ -51,6 +59,7 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   void initState() {
     super.initState();
     _obtenerUbicacionYDireccion();
+    _obtenerIdEmpresa();
   }
 
   Future<void> _obtenerUbicacionYDireccion() async {
@@ -88,6 +97,25 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       );
     }
   }
+
+  Future<void> _obtenerIdEmpresa() async {
+  final id = Uri.decodeFull(widget.tnReference);
+  final snapshot = await FirebaseDatabase.instance
+      .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$id')
+      .get();
+
+  if (snapshot.exists) {
+    final empresa = snapshot.child('idEmpresa').value?.toString();
+    setState(() {
+      _idEmpresa = empresa ?? 'NoRegistrado';
+    });
+  } else {
+    setState(() {
+      _idEmpresa = 'NoRegistrado';
+    });
+  }
+}
+
 
   Future<void> _subirImagenAFirebase(File image) async {
   try {
@@ -215,12 +243,19 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
         foregroundColor: Colors.white,
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              final resultado = await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const FallidasMultiEntregaPage()),
               );
+
+              if (resultado != null && resultado is List<String>) {
+                setState(() {
+                  _guiasFallidas = resultado;
+                });
+              }
             },
+            
             child: const Text(
               'MultiEntrega',
               style: TextStyle(color: Colors.white),
@@ -283,6 +318,21 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                     : const Icon(Icons.add_a_photo, size: 40),
               ),
             ),
+            if (_guiasFallidas.isNotEmpty) ...[
+  const SizedBox(height: 30),
+  const Text('📋 Guías fallidas registradas:',
+      style: TextStyle(fontWeight: FontWeight.bold)),
+  const SizedBox(height: 8),
+  Column(
+    children: _guiasFallidas
+        .map((id) => ListTile(
+              leading: const Icon(Icons.qr_code),
+              title: Text(id),
+            ))
+        .toList(),
+  ),
+],
+
             const SizedBox(height: 20),
             const Text('📝 Nota extra:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -296,11 +346,83 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
             ),
             const SizedBox(height: 30),
             ElevatedButton(
-              onPressed: () {
+onPressed: () async {
+final idPaquete = widget.tnReference;
+final DatabaseReference ref = FirebaseDatabase.instance.ref(
+  "projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idPaquete",
+);
 
 
-                Navigator.pop(context);
-              },
+  try {
+    final snapshot = await ref.child('Fallos').get();
+    int intento = 1;
+
+    if (snapshot.exists) {
+      final valor = snapshot.value;
+      intento = int.tryParse(valor.toString()) != null ? int.parse(valor.toString()) + 1 : 1;
+    }
+
+    final codigoFalla = 'FL$intento';
+    final fechaAhora = DateTime.now();
+    final yyyyMMddHHmmss = '${fechaAhora.year.toString().padLeft(4, '0')}'
+        '${fechaAhora.month.toString().padLeft(2, '0')}'
+        '${fechaAhora.day.toString().padLeft(2, '0')}'
+        '${fechaAhora.hour.toString().padLeft(2, '0')}'
+        '${fechaAhora.minute.toString().padLeft(2, '0')}'
+        '${fechaAhora.second.toString().padLeft(2, '0')}';
+
+    // 🔸 Actualizar Firebase solo con los campos indicados (UPDATE parcial)
+    await ref.update({
+      'Estatus': codigoFalla,
+      'Fallos': intento,
+      'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
+    });
+
+    // 🔸 Enviar al Webhook
+    final Position posicion = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    final Map<String, dynamic> body = {
+      "CodigoFalla": codigoFalla,
+      "Direccion": _direccionActual ?? "",
+      "FotoEvidencia": _urlImagen ?? "",
+      "Intentos": intento,
+      "Latitude": posicion.latitude.toString(),
+      "Longitude": posicion.longitude.toString(),
+      "MotivoFallo": _motivo,
+      "NombreDriver": globalNombre ?? "SinNombre",
+      "NombrePaquete": idPaquete,
+      "tnReference": widget.tnReference,
+      "idPaquete" : idPaquete,
+      "Timestamp": DateTime.now().millisecondsSinceEpoch,
+      "idConductor": globalUserId ?? "",
+      "idEmpresa": _idEmpresa ?? "",
+    };
+
+    final response = await http.post(
+      Uri.parse('https://editor.apphive.io/hook/ccp_aVRkoJ2HDSBnm1QwUKWxfY'),
+      headers: {HttpHeaders.contentTypeHeader: 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    if (response.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Entrega fallida registrada correctamente')),
+      );
+      Navigator.pop(context);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al enviar webhook: ${response.body}')),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Ocurrió un error: $e')),
+    );
+  }
+},
+
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               child: const Text('Guardar', style: TextStyle(color: Colors.white)),
             ),

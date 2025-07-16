@@ -17,6 +17,8 @@ class _FallidasMultiEntregaPageState extends State<FallidasMultiEntregaPage> {
   final List<String> guiasFallidas = [];
   final TextEditingController _manualController = TextEditingController();
   bool _permissionGranted = false;
+  
+
 
   @override
   void initState() {
@@ -165,7 +167,7 @@ class _FallidasMultiEntregaPageState extends State<FallidasMultiEntregaPage> {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        Navigator.pop(context);
+                        Navigator.pop(context, guiasFallidas); // ← Devuelve la lista
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
