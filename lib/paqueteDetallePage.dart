@@ -7,6 +7,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path/path.dart' as path;
+import 'login_page.dart';
+
+// donde esté declarada globalUserId
+
+
 
 import 'multi_guias_page.dart';
 
@@ -34,6 +42,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   String _opcionSeleccionada = 'Titular';
   String? _direccionActual;
   Position? _posicionActual;
+  String? _idEmpresa;
+  String? _urlImagen1;
+  String? _urlImagen2;
+  String? _urlImagen3;
+
+
 
   final List<String> _opciones = [
     'Titular',
@@ -51,6 +65,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   void initState() {
     super.initState();
     _obtenerUbicacion();
+     _obtenerIdEmpresa();
   }
 
   Future<void> _obtenerUbicacion() async {
@@ -94,6 +109,26 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
+  Future<void> _obtenerIdEmpresa() async {
+  final ref = Uri.decodeFull(widget.id); // asegurarte que el id no esté codificado
+ final snapshot = await FirebaseDatabase.instance
+    .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$ref')
+    .get();
+
+
+  if (snapshot.exists) {
+    final idEmpresa = snapshot.child('idEmpresa').value?.toString();
+    setState(() {
+      _idEmpresa = idEmpresa ?? 'No existe el código de empresa';
+    });
+  } else {
+    setState(() {
+      _idEmpresa = 'No existe el código de empresa';
+    });
+  }
+}
+
+
   Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
     final apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
     final url = 'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
@@ -132,51 +167,83 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
-  Future<void> _seleccionarImagen(int index) async {
-    final picker = ImagePicker();
+Future<void> _seleccionarImagen(int index) async {
+  final picker = ImagePicker();
 
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Seleccionar de galería'),
-              onTap: () async {
-                Navigator.pop(context);
-                final status = await Permission.photos.request();
-                if (status.isGranted) {
-                  final picked = await picker.pickImage(source: ImageSource.gallery);
-                  if (picked != null) {
-                    setState(() {
-                      _imagenes[index] = File(picked.path);
-                    });
-                  }
+  showModalBottomSheet(
+    context: context,
+    builder: (_) => SafeArea(
+      child: Wrap(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library),
+            title: const Text('Seleccionar de galería'),
+            onTap: () async {
+              Navigator.pop(context);
+              final status = await Permission.photos.request();
+              if (status.isGranted) {
+                final picked = await picker.pickImage(source: ImageSource.gallery);
+                if (picked != null) {
+                  File imageFile = File(picked.path);
+                  await _subirImagenAFirebase(imageFile, index);
                 }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Tomar foto'),
-              onTap: () async {
-                Navigator.pop(context);
-                final status = await Permission.camera.request();
-                if (status.isGranted) {
-                  final picked = await picker.pickImage(source: ImageSource.camera);
-                  if (picked != null) {
-                    setState(() {
-                      _imagenes[index] = File(picked.path);
-                    });
-                  }
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.camera_alt),
+            title: const Text('Tomar foto'),
+            onTap: () async {
+              Navigator.pop(context);
+              final status = await Permission.camera.request();
+              if (status.isGranted) {
+                final picked = await picker.pickImage(source: ImageSource.camera);
+                if (picked != null) {
+                  File imageFile = File(picked.path);
+                  await _subirImagenAFirebase(imageFile, index);
                 }
-              },
-            ),
-          ],
-        ),
+              }
+            },
+          ),
+        ],
       ),
+    ),
+  );
+}
+
+Future<void> _subirImagenAFirebase(File image, int index) async {
+  try {
+    final fileName = path.basename(image.path);
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child('imagenesaplicacion')
+        .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
+
+    final uploadTask = await ref.putFile(image);
+    final url = await ref.getDownloadURL();
+
+    setState(() {
+      _imagenes[index] = image;
+      if (index == 0) {
+        _urlImagen1 = url;
+      } else if (index == 1) {
+        _urlImagen2 = url;
+      } else if (index == 2) {
+        _urlImagen3 = url;
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Imagen subida correctamente')),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al subir imagen: $e')),
     );
   }
+}
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -229,6 +296,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
               const SizedBox(height: 12),
               Text('📍 Dirección actual: $_direccionActual'),
             ],
+            if (_idEmpresa != null) ...[
+          const SizedBox(height: 8),
+          Text('🏢 Empresa: $_idEmpresa'),
+        ],
+
             const SizedBox(height: 20),
             const Text('¿Quién recibe el paquete?',
                 style: TextStyle(fontWeight: FontWeight.bold)),
@@ -309,16 +381,101 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
               ),
             ],
             const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text(
-                'Cerrar sin firma',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
+         ElevatedButton(
+  onPressed: () async {
+    final timestamp = DateTime.now();
+    final yyyyMMdd = "${timestamp.year.toString().padLeft(4, '0')}"
+        "${timestamp.month.toString().padLeft(2, '0')}"
+        "${timestamp.day.toString().padLeft(2, '0')}";
+    final yyyyMMddHHmmss = "${timestamp.year.toString().padLeft(4, '0')}"
+        "${timestamp.month.toString().padLeft(2, '0')}"
+        "${timestamp.day.toString().padLeft(2, '0')}"
+        "${timestamp.hour.toString().padLeft(2, '0')}"
+        "${timestamp.minute.toString().padLeft(2, '0')}"
+        "${timestamp.second.toString().padLeft(2, '0')}";
+
+    final recibe = _quienRecibeController.text.trim();
+    final parentesco = _opcionSeleccionada;
+    final nota = _notaController.text.trim();
+    final alMenosUnaFoto = _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+    final estadoFoto = alMenosUnaFoto ? "el usuario dejó tomarse la foto" : "el usuario no se dejó tomar la foto";
+
+    final textoNota = "Recibe: $parentesco con nombre $recibe, $estadoFoto"
+        "${nota.isNotEmpty ? ', $nota' : ''}";
+
+// Asigna NombreEmpresa dinámicamente según idEmpresa
+String nombreEmpresa;
+if (_idEmpresa == "001000000000000001") {
+  nombreEmpresa = "Primebox";
+} else if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
+  nombreEmpresa = "Liverpol";
+} else {
+  nombreEmpresa = "Primebox";
+}
+
+final body = {
+  "Direccion": _direccionActual ?? "",
+  "FechaEstatus": timestamp.millisecondsSinceEpoch,
+  "Foto1": _urlImagen1 ?? "",
+  "Foto2": _urlImagen2 ?? "",
+  "Foto3": _urlImagen3 ?? "",
+  "Latitude": _posicionActual?.latitude.toString() ?? "",
+  "Longitude": _posicionActual?.longitude.toString() ?? "",
+  "NombreDriver": globalNombre ?? "SinNombre", // ← se asigna el nombre del conductor
+  "NombreEmpresa": nombreEmpresa,
+  "NombrePaquete": widget.id,
+  "Nota": textoNota,
+  "Parentesco": _opcionSeleccionada,
+  "Recibe": _quienRecibeController.text.trim(),
+  "YYYYMMDD": yyyyMMdd,
+  "YYYYMMDDHHmmss": yyyyMMddHHmmss,
+  "idCiudad": globalIdCiudad ?? "SinCiudad", // ← se asigna el ID de ciudad
+  "idDriver": globalUserId ?? "",
+  "idEmpresa": _idEmpresa ?? "",
+  "idMovimiento": DateTime.now().millisecondsSinceEpoch.toString(),
+  "idPaquete": widget.id,
+  "Data": _guiasMulti,
+};
+
+
+
+    try {
+      final response = await http.post(
+  Uri.parse("https://editor.apphive.io/hook/ccp_5LWiKvLL1QnGygESVmGXFV"),
+  headers: {
+    HttpHeaders.contentTypeHeader: 'application/json',
+  },
+  body: jsonEncode(body),
+);
+
+print('STATUS: ${response.statusCode}');
+print('BODY: ${response.body}');
+
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Información enviada exitosamente')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al enviar: ${response.body}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error de red: $e')),
+      );
+    }
+
+    Navigator.pop(context);
+  },
+  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+  child: const Text(
+    'Cerrar sin firma',
+    style: TextStyle(color: Colors.white),
+  ),
+),
+
           ],
         ),
       ),

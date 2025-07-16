@@ -4,6 +4,8 @@ import 'package:firebase_database/firebase_database.dart';
 
 // ✅ Variable global para guardar UID
 String? globalUserId;
+String? globalNombre;
+String? globalIdCiudad;
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -23,28 +25,47 @@ class _LoginPageState extends State<LoginPage> {
     _verificarSesionIniciada();
   }
 
-  Future<void> _verificarSesionIniciada() async {
-    final user = FirebaseAuth.instance.currentUser;
+Future<void> _verificarSesionIniciada() async {
+  final user = FirebaseAuth.instance.currentUser;
 
-    if (user != null) {
-      final uid = user.uid;
+  if (user != null) {
+    final uid = user.uid;
 
-      final DatabaseReference ref = FirebaseDatabase.instance.ref(
-        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
-      );
+    final DatabaseReference ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
+    );
 
-      final snapshot = await ref.get();
+    final snapshot = await ref.get();
 
-      if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
-        globalUserId = uid;
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/paquetes');
-        }
-      } else {
-        await FirebaseAuth.instance.signOut();
+    if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
+      globalUserId = uid;
+      await _cargarDatosConductor(uid);
+
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/paquetes');
       }
+    } else {
+      await FirebaseAuth.instance.signOut();
     }
   }
+}
+
+
+  Future<void> _cargarDatosConductor(String uid) async {
+  final DatabaseReference conductorRef = FirebaseDatabase.instance.ref(
+    'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid',
+  );
+
+  final snapshot = await conductorRef.get();
+
+  if (snapshot.exists) {
+    globalNombre = snapshot.child('Nombre').value?.toString();
+    globalIdCiudad = snapshot.child('idCiudad').value?.toString();
+  } else {
+    debugPrint('⚠️ No se encontraron datos del conductor para UID: $uid');
+  }
+}
+
 
   Future<void> _login() async {
     setState(() => loading = true);

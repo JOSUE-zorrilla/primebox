@@ -21,13 +21,15 @@ class _PaquetesPageState extends State<PaquetesPage> {
   List<Map<String, dynamic>> _paquetesFiltrados = [];
   final TextEditingController _searchController = TextEditingController();
   bool _loading = true;
-  String? _estadoConexion; // Para manejar el estado actual del conductor
+  String? _estadoConexion; 
+  
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_filtrarPaquetes);
     _verificarEstadoConductor();
+    _cargarPaquetes();
   }
 
   @override
