@@ -383,6 +383,16 @@ final DatabaseReference ref = FirebaseDatabase.instance.ref(
       desiredAccuracy: LocationAccuracy.high,
     );
 
+    final now = DateTime.now();
+
+final yyyyMMdd = '${now.year.toString().padLeft(4, '0')}'
+                 '${now.month.toString().padLeft(2, '0')}'
+                 '${now.day.toString().padLeft(2, '0')}';
+
+
+
+
+
     final Map<String, dynamic> body = {
       "CodigoFalla": codigoFalla,
       "Direccion": _direccionActual ?? "",
@@ -398,6 +408,9 @@ final DatabaseReference ref = FirebaseDatabase.instance.ref(
       "Timestamp": DateTime.now().millisecondsSinceEpoch,
       "idConductor": globalUserId ?? "",
       "idEmpresa": _idEmpresa ?? "",
+      "data": _guiasFallidas,
+      "YYYYMMDD": int.parse(yyyyMMdd),
+  "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
     };
 
     final response = await http.post(
