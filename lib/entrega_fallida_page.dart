@@ -385,9 +385,10 @@ final DatabaseReference ref = FirebaseDatabase.instance.ref(
 
     final now = DateTime.now();
 
-final yyyyMMdd = '${now.year.toString().padLeft(4, '0')}'
-                 '${now.month.toString().padLeft(2, '0')}'
+final yyyyMMdd = '${now.year.toString().padLeft(4, '0')}-'
+                 '${now.month.toString().padLeft(2, '0')}-'
                  '${now.day.toString().padLeft(2, '0')}';
+
 
 
 

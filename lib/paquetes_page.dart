@@ -75,6 +75,10 @@ class _PaquetesPageState extends State<PaquetesPage> {
   return;
 }
 
+setState(() {
+  _estadoConexion = estado;
+});
+
   }
 
   Future<void> _alternarEstadoConexion() async {

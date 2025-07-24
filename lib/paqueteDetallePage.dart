@@ -11,6 +11,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
 import 'login_page.dart';
+import 'package:intl/intl.dart';
 
 // donde esté declarada globalUserId
 
@@ -384,15 +385,10 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
          ElevatedButton(
   onPressed: () async {
     final timestamp = DateTime.now();
-    final yyyyMMdd = "${timestamp.year.toString().padLeft(4, '0')}"
-        "${timestamp.month.toString().padLeft(2, '0')}"
-        "${timestamp.day.toString().padLeft(2, '0')}";
-    final yyyyMMddHHmmss = "${timestamp.year.toString().padLeft(4, '0')}"
-        "${timestamp.month.toString().padLeft(2, '0')}"
-        "${timestamp.day.toString().padLeft(2, '0')}"
-        "${timestamp.hour.toString().padLeft(2, '0')}"
-        "${timestamp.minute.toString().padLeft(2, '0')}"
-        "${timestamp.second.toString().padLeft(2, '0')}";
+
+final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
+final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
+
 
     final recibe = _quienRecibeController.text.trim();
     final parentesco = _opcionSeleccionada;
