@@ -3,10 +3,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:geolocator/geolocator.dart';
 
 import 'perfil_page.dart';
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
+import 'login_page.dart'; // para globalNombre / globalUserId si los tienes
 import 'dart:async';
 
 class PaquetesPage extends StatefulWidget {
@@ -22,6 +24,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
   final TextEditingController _searchController = TextEditingController();
   bool _loading = true;
   String? _estadoConexion;
+
+  bool _procesandoConexion = false; // evita toques repetidos del botón
 
   late DatabaseReference _estadoConexionRef;
   StreamSubscription<DatabaseEvent>? _estadoConexionSub;
@@ -88,19 +92,180 @@ class _PaquetesPageState extends State<PaquetesPage> {
     }
   }
 
+  // ---------------------------
+  // Helpers de ubicación
+  // ---------------------------
+  Future<Position?> _obtenerPosicion() async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Activa el GPS del dispositivo para continuar.')),
+      );
+      return null;
+    }
+
+    LocationPermission perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Permiso de ubicación denegado.')),
+        );
+        return null;
+      }
+    }
+    if (perm == LocationPermission.deniedForever) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en Ajustes.')),
+      );
+      return null;
+    }
+
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('No se pudo obtener la ubicación: $e')),
+      );
+      return null;
+    }
+  }
+
+  // ---------------------------
+  // Alternar estado con webhooks
+  // ---------------------------
   Future<void> _alternarEstadoConexion() async {
+    if (_procesandoConexion) return;
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _estadoConexion == null) return;
 
-    final nuevoEstado = _estadoConexion == 'Conectado' ? 'Desconectado' : 'Conectado';
-    final conductorRef = FirebaseDatabase.instance.ref(
-      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}/EstadoConexion',
-    );
+    final estabaConectado = _estadoConexion == 'Conectado';
+    final messenger = ScaffoldMessenger.of(context);
 
-    await conductorRef.set(nuevoEstado);
-    setState(() {
-      _estadoConexion = nuevoEstado;
-    });
+    // Si está Conectado, pedir confirmación de desconexión
+    if (estabaConectado) {
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirmar desconexión'),
+          content: const Text('Solo desconéctese cuando ya no pueda continuar entregando paquetes'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      if (confirmar != true) return;
+    }
+
+    setState(() => _procesandoConexion = true);
+
+    try {
+      // 1) Obtener lat/long
+      final pos = await _obtenerPosicion();
+      if (pos == null) {
+        setState(() => _procesandoConexion = false);
+        return;
+      }
+
+// 2) Preparar datos
+final fecha = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+final nombreDriver = (globalNombre?.toString().trim().isNotEmpty ?? false)
+    ? globalNombre!
+    : (user.displayName ?? 'SinNombre');
+final idDriver = (globalUserId?.toString().trim().isNotEmpty ?? false)
+    ? globalUserId!
+    : user.uid;
+
+// Campos comunes
+final Map<String, String> base = {
+  'Latitude': pos.latitude.toString(),
+  'Longitude': pos.longitude.toString(),
+  'NombreDriver': nombreDriver,
+  'idDriver': idDriver,
+};
+
+// 3) Elegir webhook según estado ACTUAL
+final uri = Uri.parse(
+  estabaConectado
+      ? 'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_gYV8nsDeYbePDL6qoTZHxp' // al desconectarse (confirmado)
+      : 'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_8G2yAtEEFvpvxyRYQzQgcw',   // al conectarse
+);
+
+// ✨ Mismo formato de fecha, distinto nombre de campo según webhook
+final Map<String, String> body = {
+  ...base,
+  if (estabaConectado) 'FechaFormateada': fecha,  // desconexión
+  if (!estabaConectado) 'YYYYMMDDHHMMSS': fecha,  // conexión (mismo formato)
+};
+
+
+
+      // 4) Enviar webhook y esperar respuesta
+      final res = await http.post(uri, body: body);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        // 5) Actualizar EstadoConexion DESPUÉS de respuesta
+        final nuevoEstado = estabaConectado ? 'Desconectado' : 'Conectado';
+        final conductorRef = FirebaseDatabase.instance.ref(
+          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}/EstadoConexion',
+        );
+        await conductorRef.set(nuevoEstado);
+
+        setState(() {
+          _estadoConexion = nuevoEstado; // refleja al instante (además del listener)
+        });
+
+        messenger.showSnackBar(
+          SnackBar(content: Text('Estado actualizado a $nuevoEstado')),
+        );
+      } else {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error del webhook (${res.statusCode}): ${res.body}')),
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Error al cambiar estado: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _procesandoConexion = false);
+    }
+  }
+
+  // ---------------------------
+  // Helpers de conexión para acciones Aceptar/Rechazar
+  // ---------------------------
+  bool get _estaConectado => _estadoConexion == 'Conectado';
+
+  bool _requerirConexion() {
+    if (_estaConectado) return true;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('No estás conectado'),
+        content: const Text('Debes conectarte para gestionar paquetes.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+    return false;
   }
 
   Future<void> _cargarPaquetes() async {
@@ -195,30 +360,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
     }
   }
 
-  // ---------------------------
-  // Helpers de conexión
-  // ---------------------------
-  bool get _estaConectado => _estadoConexion == 'Conectado';
-
-  bool _requerirConexion() {
-    if (_estaConectado) return true;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('No estás conectado'),
-        content: const Text('Debes conectarte para gestionar paquetes.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
     final bool conectado = _estaConectado;
@@ -254,12 +395,14 @@ class _PaquetesPageState extends State<PaquetesPage> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8),
                     child: ElevatedButton(
-                      onPressed: _alternarEstadoConexion,
+                      onPressed: _procesandoConexion ? null : _alternarEstadoConexion,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: conectado ? Colors.grey[400] : Colors.green,
                       ),
                       child: Text(
-                        conectado ? 'Desconectarse' : 'Conectarse',
+                        _procesandoConexion
+                            ? (conectado ? 'Desconectando...' : 'Conectando...')
+                            : (conectado ? 'Desconectarse' : 'Conectarse'),
                         style: const TextStyle(color: Colors.black),
                       ),
                     ),
@@ -314,7 +457,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                         // -------- Botón Rechazar --------
                                         ElevatedButton(
                                           onPressed: () async {
-                                            if (!_requerirConexion()) return; // <-- exige estar conectado
+                                            if (!_requerirConexion()) return;
 
                                             final user = FirebaseAuth.instance.currentUser;
                                             if (user == null) return;
@@ -372,7 +515,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                         // -------- Botón Aceptar --------
                                         ElevatedButton(
                                           onPressed: () async {
-                                            if (!_requerirConexion()) return; // <-- exige estar conectado
+                                            if (!_requerirConexion()) return;
 
                                             final user = FirebaseAuth.instance.currentUser;
                                             if (user == null) return;
