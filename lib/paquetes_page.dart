@@ -3,11 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+
 import 'perfil_page.dart';
-
-
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
+import 'dart:async';
 
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
@@ -21,19 +21,22 @@ class _PaquetesPageState extends State<PaquetesPage> {
   List<Map<String, dynamic>> _paquetesFiltrados = [];
   final TextEditingController _searchController = TextEditingController();
   bool _loading = true;
-  String? _estadoConexion; 
-  
+  String? _estadoConexion;
+
+  late DatabaseReference _estadoConexionRef;
+  StreamSubscription<DatabaseEvent>? _estadoConexionSub;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_filtrarPaquetes);
-    _verificarEstadoConductor();
+    _escucharEstadoConexion();
     _cargarPaquetes();
   }
 
   @override
   void dispose() {
+    _estadoConexionSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -52,33 +55,37 @@ class _PaquetesPageState extends State<PaquetesPage> {
     }
   }
 
-  Future<void> _verificarEstadoConductor() async {
+  void _escucharEstadoConexion() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final conductorRef = FirebaseDatabase.instance.ref(
-      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}',
+    _estadoConexionRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}/EstadoConexion',
     );
-    final conductorSnapshot = await conductorRef.get();
 
-    if (!conductorSnapshot.exists) return;
+    _estadoConexionSub = _estadoConexionRef.onValue.listen((event) {
+      final estado = event.snapshot.value?.toString() ?? 'Desconectado';
+      setState(() {
+        _estadoConexion = estado;
+      });
+    });
 
-    final activo = conductorSnapshot.child('Activo').value?.toString() ?? 'No';
-    final estado = conductorSnapshot.child('EstadoConexion').value?.toString() ?? 'Desconectado';
+    _verificarActivo(user.uid);
+  }
 
-  if (activo.toLowerCase() != 'si') {
-  if (!mounted) return;
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const PerfilPage()),
-  );
-  return;
-}
+  Future<void> _verificarActivo(String uid) async {
+    final ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid',
+    );
+    final snap = await ref.get();
+    final activo = snap.child('Activo').value?.toString().toLowerCase() ?? 'no';
 
-setState(() {
-  _estadoConexion = estado;
-});
-
+    if (activo != 'si' && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const PerfilPage()),
+      );
+    }
   }
 
   Future<void> _alternarEstadoConexion() async {
@@ -91,7 +98,6 @@ setState(() {
     );
 
     await conductorRef.set(nuevoEstado);
-
     setState(() {
       _estadoConexion = nuevoEstado;
     });
@@ -145,15 +151,9 @@ setState(() {
   void _mostrarAlertaDevolucion() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Paquete con múltiples intentos'),
-        content: const Text('Este paquete debe ser devuelto al proveedor.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Aceptar'),
-          ),
-        ],
+      builder: (context) => const AlertDialog(
+        title: Text('Paquete con múltiples intentos'),
+        content: Text('Este paquete debe ser devuelto al proveedor.'),
       ),
     );
   }
@@ -168,7 +168,7 @@ setState(() {
     final fechaPush = DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
     final fechaEstimada = DateFormat('yyyy-MM-dd HH:mm:ss').format(now.add(const Duration(hours: 8)));
 
-    final webhookUrl = Uri.parse('https://editor.apphive.io/hook/ccp_1ms7YSCLjYnYUQnJYPp2pp');
+    final webhookUrl = Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_1ms7YSCLjYnYUQnJYPp2pp');
 
     final Map<String, String> data = {
       'Estatus': 'RP',
@@ -180,7 +180,6 @@ setState(() {
 
     if (notificarRp.toLowerCase() == 'si') {
       await http.post(webhookUrl, body: data);
-
       final ref = FirebaseDatabase.instance.ref(
         'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/$userId/Paquetes/$paqueteId/NotificarRp',
       );
@@ -196,9 +195,33 @@ setState(() {
     }
   }
 
+  // ---------------------------
+  // Helpers de conexión
+  // ---------------------------
+  bool get _estaConectado => _estadoConexion == 'Conectado';
+
+  bool _requerirConexion() {
+    if (_estaConectado) return true;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('No estás conectado'),
+        content: const Text('Debes conectarte para gestionar paquetes.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bool conectado = _estadoConexion == 'Conectado';
+    final bool conectado = _estaConectado;
 
     return Scaffold(
       appBar: AppBar(
@@ -260,8 +283,10 @@ setState(() {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text('🧾 Orden: ${paquete['id']}',
-                                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    Text(
+                                      '🧾 Orden: ${paquete['id']}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                    ),
                                     const SizedBox(height: 8),
                                     Text('📍 Dirección: ${paquete['DireccionEntrega']}'),
                                     Text('👤 Destinatario: ${paquete['Destinatario']}'),
@@ -286,8 +311,11 @@ setState(() {
                                               ),
                                             ),
                                           ),
+                                        // -------- Botón Rechazar --------
                                         ElevatedButton(
                                           onPressed: () async {
+                                            if (!_requerirConexion()) return; // <-- exige estar conectado
+
                                             final user = FirebaseAuth.instance.currentUser;
                                             if (user == null) return;
 
@@ -297,7 +325,6 @@ setState(() {
                                             );
 
                                             final snapshot = await paqueteRef.get();
-
                                             final tnReference = snapshot.child('TnReference').value?.toString() ?? '';
                                             final notificarRp = snapshot.child('NotificarRp').value?.toString() ?? '';
 
@@ -342,8 +369,11 @@ setState(() {
                                           ),
                                         ),
                                         const SizedBox(width: 10),
+                                        // -------- Botón Aceptar --------
                                         ElevatedButton(
                                           onPressed: () async {
+                                            if (!_requerirConexion()) return; // <-- exige estar conectado
+
                                             final user = FirebaseAuth.instance.currentUser;
                                             if (user == null) return;
 
@@ -355,6 +385,7 @@ setState(() {
                                             final tnReference = tnSnapshot.child('TnReference').value?.toString() ?? 'Sin referencia';
                                             final telefono = tnSnapshot.child('Telefono').value?.toString() ?? '';
 
+                                            if (!mounted) return;
                                             Navigator.push(
                                               context,
                                               MaterialPageRoute(
