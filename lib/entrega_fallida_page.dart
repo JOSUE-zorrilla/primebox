@@ -410,8 +410,8 @@ final yyyyMMdd = '${now.year.toString().padLeft(4, '0')}-'
       "idConductor": globalUserId ?? "",
       "idEmpresa": _idEmpresa ?? "",
       "data": _guiasFallidas,
-      "YYYYMMDD": int.parse(yyyyMMdd),
-    "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
+      "YYYYMMDD": yyyyMMdd,
+      "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
     };
 
     final response = await http.post(
