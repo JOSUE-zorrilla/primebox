@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -34,6 +35,9 @@ class PaqueteDetallePage extends StatefulWidget {
 }
 
 class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
+  // Marca
+  static const Color brand = Color(0xFF2F63D3);
+
   // Controllers
   final TextEditingController _quienRecibeController = TextEditingController();
   final TextEditingController _notaController = TextEditingController();
@@ -49,8 +53,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   final List<File?> _imagenes = [null, null, null];
 
   List<String> _guiasMulti = [];
-
-  static const Color brand = Color(0xFF2F63D3);
 
   final List<String> _opciones = const [
     'Titular',
@@ -136,12 +138,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.black12,
-                borderRadius: BorderRadius.circular(4),
-              ),
+              width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(4)),
             ),
             const SizedBox(height: 10),
             const Text('Captura de evidencia',
@@ -271,13 +269,13 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
         height: 36,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: color ?? brand,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -299,12 +297,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     );
   }
 
-  Widget _thumb(int index) {
+  Widget _photoSlot(int index) {
     return GestureDetector(
       onTap: () => _seleccionarImagen(index),
       child: Container(
-        width: 96,
-        height: 96,
+        width: 90,
+        height: 90,
         decoration: BoxDecoration(
           color: const Color(0xFFF4F6F9),
           borderRadius: BorderRadius.circular(12),
@@ -315,7 +313,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 borderRadius: BorderRadius.circular(12),
                 child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
               )
-            : const Icon(Icons.add_a_photo_outlined, size: 28, color: Colors.black45),
+            : const Icon(Icons.add_a_photo_outlined, size: 26, color: Colors.black45),
       ),
     );
   }
@@ -331,7 +329,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         radius: 12.0,
       ),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: child,
       ),
     );
@@ -341,13 +339,39 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F3F7),
+      backgroundColor: Colors.white, // FONDO BLANCO
       appBar: AppBar(
-        backgroundColor: brand,
-        foregroundColor: Colors.white,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.white,             // fondo blanco en status bar
+          statusBarIconBrightness: Brightness.dark, // íconos oscuros (Android)
+          statusBarBrightness: Brightness.light,    // iOS: texto oscuro
+        ),
+        backgroundColor: Colors.white,              // APPBAR BLANCO
+        foregroundColor: brand,
         elevation: 0,
         centerTitle: true,
-        title: const Text('Entrega Exitosa', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(
+          'Entrega Exitosa',
+          style: const TextStyle(fontWeight: FontWeight.w700, color: brand),
+        ),
+        leadingWidth: 58,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 34,  // más pequeño
+              height: 34, // más pequeño
+              decoration: BoxDecoration(
+                color: brand,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 16),
+            ),
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () async {
@@ -359,7 +383,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 setState(() => _guiasMulti = resultado);
               }
             },
-            child: const Text('MultiGuía', style: TextStyle(color: Colors.white)),
+            child: const Text('MultiGuía', style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
           )
         ],
       ),
@@ -369,155 +393,120 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           child: ListView(
             padding: const EdgeInsets.all(14),
             children: [
-              // ---- CARD PRINCIPAL ----
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 8, offset: Offset(0, 2))],
-                ),
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Teléfono + acciones
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Teléfono:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                              const SizedBox(height: 2),
-                              Text(widget.telefono, style: const TextStyle(fontWeight: FontWeight.w600)),
-                            ],
-                          ),
+              // --- SECCIÓN PRINCIPAL (sin card, todo blanco) ---
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Teléfono + acciones
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Teléfono:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                            const SizedBox(height: 2),
+                            Text(widget.telefono, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          ],
                         ),
-                        _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
-                        const SizedBox(width: 8),
-                        _chipButton(icon: FontAwesomeIcons.whatsapp, label: '', onTap: _enviarWhatsApp, color: const Color(0xFF25D366)),
+                      ),
+                      _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
+                      const SizedBox(width: 8),
+                      _chipButton(icon: FontAwesomeIcons.whatsapp, label: '', onTap: _enviarWhatsApp, color: const Color(0xFF25D366)),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Guía / Titular
+                  const Text('No. Guía:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  const SizedBox(height: 2),
+                  Text(widget.tnReference, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 10),
+
+                  const Text('Titular:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  const SizedBox(height: 2),
+                  Text(widget.destinatario, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+
+                  if (_idEmpresa != null)
+                    Text('Empresa: ${_idEmpresa!}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+
+                  const SizedBox(height: 16),
+
+                  _sectionTitle('¿Quién lo recibió?'),
+                  DropdownButtonFormField<String>(
+                    value: _opcionSeleccionada,
+                    decoration: _input('Parentesco'),
+                    items: _opciones.map((opcion) => DropdownMenuItem(value: opcion, child: Text(opcion))).toList(),
+                    onChanged: (v) => setState(() => _opcionSeleccionada = v!),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _quienRecibeController,
+                    decoration: _input('Nombre de quien recibe'),
+                  ),
+
+                  const SizedBox(height: 16),
+                  _sectionTitle('Captura de Evidencia'),
+
+                  // Caja punteada con 3 cuadritos (sin botones)
+                  _dashedBox(
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 6),
+                        const Icon(Icons.cloud_upload_outlined, size: 42, color: Colors.black87),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Selecciona o arrastra tus imágenes o video',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          '(Png y Jpg máx 1gb)',
+                          style: TextStyle(fontSize: 11, color: Colors.black54),
+                        ),
+                        const SizedBox(height: 12),
+
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: List.generate(3, _photoSlot),
+                        ),
                       ],
                     ),
+                  ),
 
-                    const SizedBox(height: 14),
+                  const SizedBox(height: 16),
+                  _sectionTitle('Nota Extra'),
+                  TextField(
+                    controller: _notaController,
+                    maxLines: 4,
+                    decoration: _input('Escribe tus observaciones...'),
+                  ),
 
-                    // Guía / Titular
-                    const Text('No. Guía:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                    const SizedBox(height: 2),
-                    Text(widget.tnReference, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 10),
-
-                    const Text('Titular:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                    const SizedBox(height: 2),
-                    Text(widget.destinatario, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 6),
-
-                    if (_idEmpresa != null)
-                      Text('Empresa: ${_idEmpresa!}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-
+                  if (_guiasMulti.isNotEmpty) ...[
                     const SizedBox(height: 16),
-
-                    // ¿Quién lo recibió?
-                    _sectionTitle('¿Quien lo recibió?'),
-                    DropdownButtonFormField<String>(
-                      value: _opcionSeleccionada,
-                      decoration: _input('Parentesco'),
-                      items: _opciones.map((op) => DropdownMenuItem(value: op, child: Text(op))).toList(),
-                      onChanged: (v) => setState(() => _opcionSeleccionada = v!),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _quienRecibeController,
-                      decoration: _input('Nombre de quien recibe'),
-                    ),
-
-                    const SizedBox(height: 16),
-                    _sectionTitle('Captura de Evidencia'),
-
-                    _dashedBox(
+                    _sectionTitle('Guías asociadas'),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF9FAFB),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE6E6E6)),
+                      ),
                       child: Column(
-                        children: [
-                          const SizedBox(height: 8),
-                          const Icon(Icons.upload_rounded, size: 42, color: Colors.black87),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Selecciona o arrastra tus imágenes o video\nPeso máximo 10MB',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, color: Colors.black87),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () => _seleccionarImagen(0),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    side: const BorderSide(color: brand),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  ),
-                                  child: const Text('Tomar Fotografía', style: TextStyle(fontWeight: FontWeight.w600)),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () => _seleccionarImagen(1),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: brand,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  ),
-                                  child: const Text('Archivos Galería', style: TextStyle(fontWeight: FontWeight.w600)),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                        ],
+                        children: _guiasMulti
+                            .map((id) => ListTile(
+                                  dense: true,
+                                  leading: const Icon(Icons.qr_code_2_outlined),
+                                  title: Text(id),
+                                ))
+                            .toList(),
                       ),
                     ),
-
-                    if (_imagenes.any((f) => f != null)) ...[
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: List.generate(3, _thumb),
-                      ),
-                    ],
-
-                    const SizedBox(height: 16),
-                    _sectionTitle('Nota Extra'),
-                    TextField(
-                      controller: _notaController,
-                      maxLines: 4,
-                      decoration: _input('Escribe tus observaciones...'),
-                    ),
-
-                    if (_guiasMulti.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      _sectionTitle('Guías asociadas'),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF9FAFB),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE6E6E6)),
-                        ),
-                        child: Column(
-                          children: _guiasMulti
-                              .map((id) => ListTile(
-                                    dense: true,
-                                    leading: const Icon(Icons.qr_code_2_outlined),
-                                    title: Text(id),
-                                  ))
-                              .toList(),
-                        ),
-                      ),
-                    ],
                   ],
-                ),
+                ],
               ),
 
               const SizedBox(height: 14),
@@ -636,7 +625,7 @@ class _DashedRectPainter extends CustomPainter {
   final double dashSpace;
   final double radius;
 
-  _DashedRectPainter({
+  const _DashedRectPainter({
     required this.color,
     required this.strokeWidth,
     required this.dashWidth,
@@ -655,7 +644,6 @@ class _DashedRectPainter extends CustomPainter {
     final double h = size.height;
     final double r = radius;
 
-    // Líneas rectas
     void drawDashedLine(Offset start, Offset end) {
       final bool isHorizontal = start.dy == end.dy;
       final double length = isHorizontal ? (end.dx - start.dx).abs() : (end.dy - start.dy).abs();
@@ -669,13 +657,12 @@ class _DashedRectPainter extends CustomPainter {
       }
     }
 
-    // Lados (dejamos hueco r en esquinas para formar el radio)
+    // Lados rectos dejando radio en esquinas
     drawDashedLine(Offset(r, 0), Offset(w - r, 0)); // top
     drawDashedLine(Offset(w, r), Offset(w, h - r)); // right
     drawDashedLine(Offset(w - r, h), Offset(r, h)); // bottom
     drawDashedLine(Offset(0, h - r), Offset(0, r)); // left
 
-    // Esquinas: aproximamos arcos con segmentos
     void drawDashedArc(Rect rect, double startAngle, double sweep) {
       final path = Path()..addArc(rect, startAngle, sweep);
       for (final metric in path.computeMetrics()) {
