@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,9 +11,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
-import 'login_page.dart'; // ya lo estás haciendo 👍
+import 'login_page.dart';
 import 'package:firebase_database/firebase_database.dart';
-
 import 'fallidas_multientrega_page.dart';
 
 class EntregaFallidaPage extends StatefulWidget {
@@ -31,15 +32,25 @@ class EntregaFallidaPage extends StatefulWidget {
 }
 
 class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
+  // Marca (rojo principal del diseño)
+  static const Color brand = Color(0xFFE04B41); // ajusta si quieres otro tono
+
   final TextEditingController _notaController = TextEditingController();
+
+  // Imagen única (evidencia fallida)
   final List<File?> _imagenes = [null];
   String? _urlImagen;
+
+  // Multi-entrega
   List<String> _guiasFallidas = [];
+
+  // Empresa y ubicación
   String? _idEmpresa;
+  Position? _posicionActual;
 
+  // Motivos
   String _motivo = 'Titular ausente';
-
-  final List<String> _motivos = [
+  final List<String> _motivos = const [
     'Titular ausente',
     'Titular no localizado',
     'Domicilio incorrecto',
@@ -52,41 +63,30 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   @override
   void initState() {
     super.initState();
-    _obtenerUbicacion(); // Solo permisos y verificación de GPS; sin geocoding
+    _obtenerUbicacion();
     _obtenerIdEmpresa();
   }
 
+  // ---------------------- LÓGICA ----------------------
   Future<void> _obtenerUbicacion() async {
     final status = await Permission.location.request();
-
     if (status.isGranted) {
       final servicioActivo = await Geolocator.isLocationServiceEnabled();
       if (!servicioActivo) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Activa el GPS del dispositivo.')),
-        );
+        _snack('Activa el GPS del dispositivo.');
         return;
       }
-
-      // Opcional: “calentar” la ubicación (no guardamos dirección)
       try {
-        await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+        _posicionActual =
+            await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al obtener ubicación: $e')),
-        );
+        _snack('Error al obtener ubicación: $e');
       }
     } else if (status.isPermanentlyDenied) {
       openAppSettings();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.'),
-        ),
-      );
+      _snack('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.');
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permiso de ubicación denegado')),
-      );
+      _snack('Permiso de ubicación denegado');
     }
   }
 
@@ -98,17 +98,21 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
 
     if (snapshot.exists) {
       final empresa = snapshot.child('idEmpresa').value?.toString();
-      setState(() {
-        _idEmpresa = empresa ?? 'NoRegistrado';
-      });
+      setState(() => _idEmpresa = empresa ?? 'NoRegistrado');
     } else {
-      setState(() {
-        _idEmpresa = 'NoRegistrado';
-      });
+      setState(() => _idEmpresa = 'NoRegistrado');
     }
   }
 
   Future<void> _subirImagenAFirebase(File image) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Cargando imagen…'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(days: 1),
+      ),
+    );
     try {
       final fileName = path.basename(image.path);
       final ref = FirebaseStorage.instance
@@ -120,93 +124,165 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       final url = await ref.getDownloadURL();
 
       setState(() {
+        _imagenes[0] = image;
         _urlImagen = url;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         const SnackBar(content: Text('Imagen subida correctamente')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text('Error al subir imagen: $e')),
       );
     }
   }
 
+  // Acciones
   void _llamar() async {
     final uri = Uri(scheme: 'tel', path: widget.telefono);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    }
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
   void _enviarWhatsApp() async {
     final mensaje = 'Hola, te saludamos de Primebox Driver';
     final telefono = widget.telefono.replaceAll('+', '').replaceAll(' ', '');
-    final uri = Uri.parse('https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
-
+    final uri =
+        Uri.parse('https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
-  Future<void> _seleccionarImagen() async {
+  // Botones directos (como en el diseño)
+  Future<void> _tomarFotografia() async {
+    final status = await Permission.camera.request();
+    if (!status.isGranted) {
+      _snack('Permiso de cámara denegado');
+      return;
+    }
     final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.camera);
+    if (picked != null) {
+      await _subirImagenAFirebase(File(picked.path));
+    }
+  }
 
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Wrap(
+  Future<void> _abrirGaleria() async {
+    final status = await Permission.photos.request(); // iOS; en Android se maneja por app
+    if (!status.isGranted) {
+      _snack('Permiso de galería denegado');
+      return;
+    }
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked != null) {
+      await _subirImagenAFirebase(File(picked.path));
+    }
+  }
+
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ---------------------- UI HELPERS ----------------------
+  InputDecoration _input(String hint) => InputDecoration(
+        hintText: hint,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFFE6E6E6)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: brand, width: 1.2),
+        ),
+      );
+
+  Widget _sectionTitle(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+      );
+
+  Widget _chipButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: color ?? brand,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Seleccionar de galería'),
-              onTap: () async {
-                Navigator.pop(context);
-                final status = await Permission.photos.request();
-                if (status.isGranted) {
-                  final picked = await picker.pickImage(source: ImageSource.gallery);
-                  if (picked != null) {
-                    final imageFile = File(picked.path);
-                    setState(() {
-                      _imagenes[0] = imageFile;
-                    });
-                    await _subirImagenAFirebase(imageFile);
-                  }
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Tomar foto'),
-              onTap: () async {
-                Navigator.pop(context);
-                final status = await Permission.camera.request();
-                if (status.isGranted) {
-                  final picked = await picker.pickImage(source: ImageSource.camera);
-                  if (picked != null) {
-                    final imageFile = File(picked.path);
-                    setState(() {
-                      _imagenes[0] = imageFile;
-                    });
-                    await _subirImagenAFirebase(imageFile);
-                  }
-                }
-              },
-            ),
+            Icon(icon, size: 18, color: Colors.white),
+            if (label.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            ],
           ],
         ),
       ),
     );
   }
 
+  // Caja punteada
+  Widget _dashedBox({required Widget child}) {
+    return CustomPaint(
+      painter: _DashedRectPainter(
+        color: const Color(0xFFCBD5E1),
+        strokeWidth: 1.2,
+        dashWidth: 6.0,
+        dashSpace: 4.0,
+        radius: 12.0,
+      ),
+      child: Container(padding: const EdgeInsets.all(14), child: child),
+    );
+  }
+
+  // ---------------------- BUILD ----------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white, // fondo blanco
       appBar: AppBar(
-        title: const Text('Entrega Fallida'),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.white,
+          statusBarIconBrightness: Brightness.dark, // Android
+          statusBarBrightness: Brightness.light,    // iOS
+        ),
+        backgroundColor: Colors.white, // AppBar blanco
+        elevation: 0,
+        centerTitle: true,
+        title: const Text('Entrega Fallida',
+            style: TextStyle(fontWeight: FontWeight.w700, color: brand)),
+        leadingWidth: 58,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: brand, borderRadius: BorderRadius.circular(8)),
+              alignment: Alignment.center,
+              child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 16),
+            ),
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () async {
@@ -214,194 +290,345 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 context,
                 MaterialPageRoute(builder: (_) => const FallidasMultiEntregaPage()),
               );
-
               if (resultado != null && resultado is List<String>) {
-                setState(() {
-                  _guiasFallidas = resultado;
-                });
+                setState(() => _guiasFallidas = resultado);
               }
             },
-            child: const Text(
-              'MultiEntrega',
-              style: TextStyle(color: Colors.white),
-            ),
+            child: const Text('MultiEntrega',
+                style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ListView(
-          children: [
-            Row(
-              children: [
-                Expanded(child: Text('📞 Teléfono: ${widget.telefono}')),
-                IconButton(
-                  icon: const Icon(Icons.phone, color: Colors.green),
-                  onPressed: _llamar,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: ListView(
+            padding: const EdgeInsets.all(14),
+            children: [
+              // Teléfono + Acciones
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Teléfono:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        const SizedBox(height: 2),
+                        Text(widget.telefono, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                  _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
+                  const SizedBox(width: 8),
+                  _chipButton(
+                    icon: FontAwesomeIcons.whatsapp,
+                    label: '',
+                    onTap: _enviarWhatsApp,
+                    color: const Color(0xFF25D366),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+
+              // No. Guía y titular
+              const Text('No. Guía:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+              const SizedBox(height: 2),
+              Text('#${widget.tnReference}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+
+              const Text('Titular:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+              const SizedBox(height: 2),
+              Text(widget.destinatario, style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 16),
+
+              // Motivo / Método
+              _sectionTitle('Metodo de Entrega Fallida'),
+              DropdownButtonFormField<String>(
+                value: _motivo,
+                decoration: _input('Selecciona una opción').copyWith(
+                  // cajita roja con la flecha, como el diseño
+                  suffixIcon: Container(
+                    margin: const EdgeInsets.only(right: 2),
+                    decoration: BoxDecoration(
+                      color: brand,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: Colors.white),
+                  ),
                 ),
-                IconButton(
-                  icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green),
-                  onPressed: _enviarWhatsApp,
+                items: _motivos
+                    .map((mot) => DropdownMenuItem(value: mot, child: Text(mot)))
+                    .toList(),
+                onChanged: (v) => setState(() => _motivo = v!),
+              ),
+
+              const SizedBox(height: 16),
+              _sectionTitle('Captura de Evidencia'),
+              _dashedBox(
+                child: Column(
+                  children: [
+                    const SizedBox(height: 6),
+                    const Icon(Icons.cloud_upload_outlined, size: 42, color: Colors.black87),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Selecciona o arrastra tus imágenes o video',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text('(Png y Jpg máx 1gb)',
+                        style: TextStyle(fontSize: 11, color: Colors.black54)),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        // Botón oscuro (como en diseño)
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _tomarFotografia,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0F1A2B), // navy oscuro
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Tomar Fotografía',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _abrirGaleria,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: brand,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Archivos Galería',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    // Vista previa si hay imagen
+                    if (_imagenes[0] != null) ...[
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(_imagenes[0]!, height: 150, width: double.infinity, fit: BoxFit.cover),
+                      ),
+                    ]
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+              _sectionTitle('Nota Extra'),
+              TextField(
+                controller: _notaController,
+                maxLines: 4,
+                decoration: _input('Observaciones adicionales...'),
+              ),
+
+              if (_guiasFallidas.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _sectionTitle('Guías fallidas registradas'),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF9FAFB),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE6E6E6)),
+                  ),
+                  child: Column(
+                    children: _guiasFallidas
+                        .map((id) => ListTile(
+                              dense: true,
+                              leading: const Icon(Icons.qr_code),
+                              title: Text(id),
+                            ))
+                        .toList(),
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Text('👤 Titular: ${widget.destinatario}'),
-            Text('🔢 TnReference: ${widget.tnReference}'),
-            const SizedBox(height: 20),
-            const Text('Motivo de entrega fallida:',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: _motivo,
-              decoration: const InputDecoration(border: OutlineInputBorder()),
-              items: _motivos
-                  .map((mot) => DropdownMenuItem(value: mot, child: Text(mot)))
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _motivo = value!;
-                });
-              },
-            ),
-            const SizedBox(height: 20),
-            const Text('📷 Captura de evidencia fallida:',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: _seleccionarImagen,
-              child: Container(
-                width: double.infinity,
-                height: 200,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey),
-                  color: Colors.grey[200],
+
+              const SizedBox(height: 14),
+
+              // BOTÓN GUARDAR
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final idPaquete = widget.tnReference;
+                    final DatabaseReference ref = FirebaseDatabase.instance
+                        .ref("projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idPaquete");
+
+                    try {
+                      final snapshot = await ref.child('Fallos').get();
+                      int intento = 1;
+                      if (snapshot.exists) {
+                        final valor = snapshot.value;
+                        intento = int.tryParse(valor.toString()) != null
+                            ? int.parse(valor.toString()) + 1
+                            : 1;
+                      }
+
+                      final codigoFalla = 'FL$intento';
+                      final fechaAhora = DateTime.now();
+                      final yyyyMMddHHmmss =
+                          '${fechaAhora.year.toString().padLeft(4, '0')}'
+                          '${fechaAhora.month.toString().padLeft(2, '0')}'
+                          '${fechaAhora.day.toString().padLeft(2, '0')}'
+                          '${fechaAhora.hour.toString().padLeft(2, '0')}'
+                          '${fechaAhora.minute.toString().padLeft(2, '0')}'
+                          '${fechaAhora.second.toString().padLeft(2, '0')}';
+
+                      await ref.update({
+                        'Estatus': codigoFalla,
+                        'Fallos': intento,
+                        'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
+                      });
+
+                      final Position posicion = _posicionActual ??
+                          await Geolocator.getCurrentPosition(
+                              desiredAccuracy: LocationAccuracy.high);
+
+                      final now = DateTime.now();
+                      final yyyyMMdd =
+                          '${now.year.toString().padLeft(4, '0')}-'
+                          '${now.month.toString().padLeft(2, '0')}-'
+                          '${now.day.toString().padLeft(2, '0')}';
+
+                      final Map<String, dynamic> body = {
+                        "CodigoFalla": codigoFalla,
+                        "Direccion": "",
+                        "FotoEvidencia": _urlImagen ?? "",
+                        "Intentos": intento,
+                        "Latitude": posicion.latitude.toString(),
+                        "Longitude": posicion.longitude.toString(),
+                        "MotivoFallo": _motivo,
+                        "NombreDriver": globalNombre ?? "SinNombre",
+                        "NombrePaquete": idPaquete,
+                        "tnReference": widget.tnReference,
+                        "idPaquete": idPaquete,
+                        "Timestamp": DateTime.now().millisecondsSinceEpoch,
+                        "idConductor": globalUserId ?? "",
+                        "idEmpresa": _idEmpresa ?? "",
+                        "data": _guiasFallidas,
+                        "YYYYMMDD": yyyyMMdd,
+                        "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
+                      };
+
+                      final response = await http.post(
+                        Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_bzSiG1tauvQ5us7gtyQKEd'),
+                        headers: {HttpHeaders.contentTypeHeader: 'application/json'},
+                        body: jsonEncode(body),
+                      );
+
+                      if (!mounted) return;
+
+                      if (response.statusCode == 200) {
+                        _snack('Entrega fallida registrada correctamente');
+                        Navigator.pop(context);
+                      } else {
+                        _snack('Error al enviar webhook: ${response.body}');
+                      }
+                    } catch (e) {
+                      if (!mounted) return;
+                      _snack('Ocurrió un error: $e');
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brand,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                    elevation: 0,
+                  ),
+                  child: const Text('Guardar'),
                 ),
-                child: _imagenes[0] != null
-                    ? Image.file(_imagenes[0]!, fit: BoxFit.cover)
-                    : const Icon(Icons.add_a_photo, size: 40),
               ),
-            ),
-            if (_guiasFallidas.isNotEmpty) ...[
-              const SizedBox(height: 30),
-              const Text('📋 Guías fallidas registradas:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Column(
-                children: _guiasFallidas
-                    .map((id) => ListTile(
-                          leading: const Icon(Icons.qr_code),
-                          title: Text(id),
-                        ))
-                    .toList(),
-              ),
             ],
-            const SizedBox(height: 20),
-            const Text('📝 Nota extra:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _notaController,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                hintText: 'Observaciones adicionales...',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: () async {
-                final idPaquete = widget.tnReference;
-                final DatabaseReference ref = FirebaseDatabase.instance.ref(
-                  "projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idPaquete",
-                );
-
-                try {
-                  final snapshot = await ref.child('Fallos').get();
-                  int intento = 1;
-
-                  if (snapshot.exists) {
-                    final valor = snapshot.value;
-                    intento = int.tryParse(valor.toString()) != null
-                        ? int.parse(valor.toString()) + 1
-                        : 1;
-                  }
-
-                  final codigoFalla = 'FL$intento';
-                  final fechaAhora = DateTime.now();
-                  final yyyyMMddHHmmss =
-                      '${fechaAhora.year.toString().padLeft(4, '0')}'
-                      '${fechaAhora.month.toString().padLeft(2, '0')}'
-                      '${fechaAhora.day.toString().padLeft(2, '0')}'
-                      '${fechaAhora.hour.toString().padLeft(2, '0')}'
-                      '${fechaAhora.minute.toString().padLeft(2, '0')}'
-                      '${fechaAhora.second.toString().padLeft(2, '0')}';
-
-                  // 🔸 UPDATE parcial en Firebase
-                  await ref.update({
-                    'Estatus': codigoFalla,
-                    'Fallos': intento,
-                    'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
-                  });
-
-                  // 🔸 Ubicación (lat/lng) sin geocoding
-                  final Position posicion = await Geolocator.getCurrentPosition(
-                    desiredAccuracy: LocationAccuracy.high,
-                  );
-
-                  final now = DateTime.now();
-                  final yyyyMMdd =
-                      '${now.year.toString().padLeft(4, '0')}-'
-                      '${now.month.toString().padLeft(2, '0')}-'
-                      '${now.day.toString().padLeft(2, '0')}';
-
-                  final Map<String, dynamic> body = {
-                    "CodigoFalla": codigoFalla,
-                    "Direccion": "", // Se elimina geocoding, va vacío
-                    "FotoEvidencia": _urlImagen ?? "",
-                    "Intentos": intento,
-                    "Latitude": posicion.latitude.toString(),
-                    "Longitude": posicion.longitude.toString(),
-                    "MotivoFallo": _motivo,
-                    "NombreDriver": globalNombre ?? "SinNombre",
-                    "NombrePaquete": idPaquete,
-                    "tnReference": widget.tnReference,
-                    "idPaquete": idPaquete,
-                    "Timestamp": DateTime.now().millisecondsSinceEpoch,
-                    "idConductor": globalUserId ?? "",
-                    "idEmpresa": _idEmpresa ?? "",
-                    "data": _guiasFallidas,
-                    "YYYYMMDD": yyyyMMdd,
-                    "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
-                  };
-
-                  final response = await http.post(
-                    Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_bzSiG1tauvQ5us7gtyQKEd'),
-                    headers: {HttpHeaders.contentTypeHeader: 'application/json'},
-                    body: jsonEncode(body),
-                  );
-
-                  if (response.statusCode == 200) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Entrega fallida registrada correctamente')),
-                    );
-                    Navigator.pop(context);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error al enviar webhook: ${response.body}')),
-                    );
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Ocurrió un error: $e')),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text('Guardar', style: TextStyle(color: Colors.white)),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
+
+// ---------- Painter de borde punteado ----------
+class _DashedRectPainter extends CustomPainter {
+  final Color color;
+  final double strokeWidth;
+  final double dashWidth;
+  final double dashSpace;
+  final double radius;
+
+  const _DashedRectPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.dashWidth,
+    required this.dashSpace,
+    required this.radius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    final double w = size.width;
+    final double h = size.height;
+    final double r = radius;
+
+    void drawDashedLine(Offset start, Offset end) {
+      final bool isHorizontal = start.dy == end.dy;
+      final double length = isHorizontal ? (end.dx - start.dx).abs() : (end.dy - start.dy).abs();
+      double drawn = 0.0;
+      while (drawn < length) {
+        final double next = ((drawn + dashWidth).clamp(0.0, length)).toDouble();
+        final Offset p1 = isHorizontal ? Offset(start.dx + drawn, start.dy) : Offset(start.dx, start.dy + drawn);
+        final Offset p2 = isHorizontal ? Offset(start.dx + next, start.dy) : Offset(start.dx, start.dy + next);
+        canvas.drawLine(p1, p2, paint);
+        drawn += dashWidth + dashSpace;
+      }
+    }
+
+    drawDashedLine(Offset(r, 0), Offset(w - r, 0)); // top
+    drawDashedLine(Offset(w, r), Offset(w, h - r)); // right
+    drawDashedLine(Offset(w - r, h), Offset(r, h)); // bottom
+    drawDashedLine(Offset(0, h - r), Offset(0, r)); // left
+
+    void drawDashedArc(Rect rect, double startAngle, double sweep) {
+      final path = Path()..addArc(rect, startAngle, sweep);
+      for (final metric in path.computeMetrics()) {
+        double distance = 0.0;
+        while (distance < metric.length) {
+          final double next = ((distance + dashWidth).clamp(0.0, metric.length)).toDouble();
+          final extract = metric.extractPath(distance, next);
+          canvas.drawPath(extract, paint);
+          distance += dashWidth + dashSpace;
+        }
+      }
+    }
+
+    drawDashedArc(Rect.fromCircle(center: Offset(r, r), radius: r), math.pi, math.pi / 2); // top-left
+    drawDashedArc(Rect.fromCircle(center: Offset(w - r, r), radius: r), -math.pi / 2, math.pi / 2); // top-right
+    drawDashedArc(Rect.fromCircle(center: Offset(w - r, h - r), radius: r), 0, math.pi / 2); // bottom-right
+    drawDashedArc(Rect.fromCircle(center: Offset(r, h - r), radius: r), math.pi / 2, math.pi / 2); // bottom-left
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRectPainter old) =>
+      old.color != color ||
+      old.strokeWidth != strokeWidth ||
+      old.dashWidth != dashWidth ||
+      old.dashSpace != dashSpace ||
+      old.radius != radius;
 }
