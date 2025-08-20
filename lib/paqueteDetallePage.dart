@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -12,9 +13,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
 import 'login_page.dart';
 import 'package:intl/intl.dart';
-
-// donde esté declarada globalUserId
-
 import 'multi_guias_page.dart';
 
 class PaqueteDetallePage extends StatefulWidget {
@@ -36,16 +34,25 @@ class PaqueteDetallePage extends StatefulWidget {
 }
 
 class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
+  // Controllers
   final TextEditingController _quienRecibeController = TextEditingController();
   final TextEditingController _notaController = TextEditingController();
+
+  // Estado
   String _opcionSeleccionada = 'Titular';
   Position? _posicionActual;
   String? _idEmpresa;
+
   String? _urlImagen1;
   String? _urlImagen2;
   String? _urlImagen3;
+  final List<File?> _imagenes = [null, null, null];
 
-  final List<String> _opciones = [
+  List<String> _guiasMulti = [];
+
+  static const Color brand = Color(0xFF2F63D3);
+
+  final List<String> _opciones = const [
     'Titular',
     'Familiar',
     'Amigo',
@@ -54,9 +61,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     'Otro',
   ];
 
-  final List<File?> _imagenes = [null, null, null];
-  List<String> _guiasMulti = []; // Guías escaneadas desde MultiGuiasPage
-
   @override
   void initState() {
     super.initState();
@@ -64,75 +68,55 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     _obtenerIdEmpresa();
   }
 
+  // ---------------- LÓGICA ----------------
   Future<void> _obtenerUbicacion() async {
     final status = await Permission.location.request();
-
     if (status.isGranted) {
-      bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+      final servicioActivo = await Geolocator.isLocationServiceEnabled();
       if (!servicioActivo) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Por favor activa el GPS del dispositivo.')),
-        );
+        _snack('Por favor activa el GPS del dispositivo.');
         return;
       }
-
       try {
         final position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
         );
-
-        setState(() {
-          _posicionActual = position;
-        });
+        setState(() => _posicionActual = position);
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al obtener ubicación: $e')),
-        );
+        _snack('Error al obtener ubicación: $e');
       }
     } else if (status.isPermanentlyDenied) {
       openAppSettings();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.'),
-        ),
-      );
+      _snack('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.');
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permiso de ubicación denegado')),
-      );
+      _snack('Permiso de ubicación denegado');
     }
   }
 
   Future<void> _obtenerIdEmpresa() async {
-    final ref = Uri.decodeFull(widget.id); // asegurarte que el id no esté codificado
+    final ref = Uri.decodeFull(widget.id);
     final snapshot = await FirebaseDatabase.instance
         .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$ref')
         .get();
 
     if (snapshot.exists) {
       final idEmpresa = snapshot.child('idEmpresa').value?.toString();
-      setState(() {
-        _idEmpresa = idEmpresa ?? 'No existe el código de empresa';
-      });
+      setState(() => _idEmpresa = idEmpresa ?? 'No existe el código de empresa');
     } else {
-      setState(() {
-        _idEmpresa = 'No existe el código de empresa';
-      });
+      setState(() => _idEmpresa = 'No existe el código de empresa');
     }
   }
 
   void _llamar() async {
     final uri = Uri(scheme: 'tel', path: widget.telefono);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    }
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
   void _enviarWhatsApp() async {
     final mensaje = 'Hola, te saludamos de Primebox Driver';
     final telefono = widget.telefono.replaceAll('+', '').replaceAll(' ', '');
-    final uri = Uri.parse('https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
-
+    final uri = Uri.parse(
+        'https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -143,21 +127,39 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
     showModalBottomSheet(
       context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
       builder: (_) => SafeArea(
-        child: Wrap(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text('Captura de evidencia',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const SizedBox(height: 6),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Seleccionar de galería'),
               onTap: () async {
                 Navigator.pop(context);
-                final status = await Permission.photos.request();
+                final status = await Permission.photos.request(); // iOS
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.gallery);
                   if (picked != null) {
-                    File imageFile = File(picked.path);
-                    await _subirImagenAFirebase(imageFile, index);
+                    await _subirImagenAFirebase(File(picked.path), index);
                   }
+                } else {
+                  _snack('Permiso de galería denegado');
                 }
               },
             ),
@@ -170,12 +172,14 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.camera);
                   if (picked != null) {
-                    File imageFile = File(picked.path);
-                    await _subirImagenAFirebase(imageFile, index);
+                    await _subirImagenAFirebase(File(picked.path), index);
                   }
+                } else {
+                  _snack('Permiso de cámara denegado');
                 }
               },
             ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -183,16 +187,14 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   }
 
   Future<void> _subirImagenAFirebase(File image, int index) async {
-    // --- Toast/aviso mientras carga ---
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
       const SnackBar(
         content: Text('La imagen se está cargando…'),
         behavior: SnackBarBehavior.floating,
-        duration: Duration(days: 1), // práctico: "infinito" hasta ocultar
+        duration: Duration(days: 1),
       ),
     );
-    // ----------------------------------
 
     try {
       final fileName = path.basename(image.path);
@@ -210,12 +212,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           _urlImagen1 = url;
         } else if (index == 1) {
           _urlImagen2 = url;
-        } else if (index == 2) {
+        } else {
           _urlImagen3 = url;
         }
       });
 
-      // Quita el "cargando" y muestra éxito
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         const SnackBar(
@@ -224,7 +225,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         ),
       );
     } catch (e) {
-      // Quita el "cargando" y muestra error
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(
@@ -235,13 +235,119 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // -------------- ESTILOS / UI HELPERS --------------
+  InputDecoration _input(String hint) => InputDecoration(
+        hintText: hint,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Color(0xFFE6E6E6)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: brand, width: 1.2),
+        ),
+      );
+
+  Widget _sectionTitle(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          text,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        ),
+      );
+
+  Widget _chipButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: color ?? brand,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: Colors.white),
+            if (label.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumb(int index) {
+    return GestureDetector(
+      onTap: () => _seleccionarImagen(index),
+      child: Container(
+        width: 96,
+        height: 96,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F6F9),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE6E6E6)),
+        ),
+        child: _imagenes[index] != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
+              )
+            : const Icon(Icons.add_a_photo_outlined, size: 28, color: Colors.black45),
+      ),
+    );
+  }
+
+  // ---------- Painter para borde punteado ----------
+  Widget _dashedBox({required Widget child}) {
+    return CustomPaint(
+      painter: _DashedRectPainter(
+        color: const Color(0xFFCBD5E1),
+        strokeWidth: 1.2,
+        dashWidth: 6.0,
+        dashSpace: 4.0,
+        radius: 12.0,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        child: child,
+      ),
+    );
+  }
+  // -------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF2F3F7),
       appBar: AppBar(
-        title: const Text('Detalle del Paquete'),
-        backgroundColor: const Color(0xFF1A3365),
+        backgroundColor: brand,
         foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text('Entrega Exitosa', style: TextStyle(fontWeight: FontWeight.w700)),
         actions: [
           TextButton(
             onPressed: () async {
@@ -250,223 +356,350 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
               );
               if (resultado != null && resultado is List<String>) {
-                setState(() {
-                  _guiasMulti = resultado;
-                });
+                setState(() => _guiasMulti = resultado);
               }
             },
-            child: const Text(
-              'MultiGuía',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
+            child: const Text('MultiGuía', style: TextStyle(color: Colors.white)),
+          )
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ListView(
-          children: [
-            Row(
-              children: [
-                Expanded(child: Text('📞 Teléfono: ${widget.telefono}')),
-                IconButton(
-                  icon: const Icon(Icons.phone, color: Colors.green),
-                  onPressed: _llamar,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: ListView(
+            padding: const EdgeInsets.all(14),
+            children: [
+              // ---- CARD PRINCIPAL ----
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 8, offset: Offset(0, 2))],
                 ),
-                IconButton(
-                  icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.green),
-                  onPressed: _enviarWhatsApp,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text('👤 Titular: ${widget.destinatario}'),
-            Text('🔢 TnReference: ${widget.tnReference}'),
-            if (_idEmpresa != null) ...[
-              const SizedBox(height: 8),
-              Text('🏢 Empresa: $_idEmpresa'),
-            ],
-
-            const SizedBox(height: 20),
-            const Text('¿Quién recibe el paquete?',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _quienRecibeController,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: 'Nombre de quien recibe',
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text('Relación con el destinatario:',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: _opcionSeleccionada,
-              decoration: const InputDecoration(border: OutlineInputBorder()),
-              items: _opciones
-                  .map((opcion) => DropdownMenuItem(
-                        value: opcion,
-                        child: Text(opcion),
-                      ))
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _opcionSeleccionada = value!;
-                });
-              },
-            ),
-            const SizedBox(height: 20),
-            const Text('📷 Fotografías:',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(3, (index) {
-                return GestureDetector(
-                  onTap: () => _seleccionarImagen(index),
-                  child: Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey),
-                      color: Colors.grey[200],
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Teléfono + acciones
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Teléfono:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                              const SizedBox(height: 2),
+                              Text(widget.telefono, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                        _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
+                        const SizedBox(width: 8),
+                        _chipButton(icon: FontAwesomeIcons.whatsapp, label: '', onTap: _enviarWhatsApp, color: const Color(0xFF25D366)),
+                      ],
                     ),
-                    child: _imagenes[index] != null
-                        ? Image.file(_imagenes[index]!, fit: BoxFit.cover)
-                        : const Icon(Icons.add_a_photo, size: 30),
-                  ),
-                );
-              }),
-            ),
-            const SizedBox(height: 20),
-            const Text('📝 Agregar alguna nota (opcional):',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _notaController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText: 'Escribe tus observaciones...',
-                border: OutlineInputBorder(),
+
+                    const SizedBox(height: 14),
+
+                    // Guía / Titular
+                    const Text('No. Guía:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 2),
+                    Text(widget.tnReference, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 10),
+
+                    const Text('Titular:', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 2),
+                    Text(widget.destinatario, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+
+                    if (_idEmpresa != null)
+                      Text('Empresa: ${_idEmpresa!}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+
+                    const SizedBox(height: 16),
+
+                    // ¿Quién lo recibió?
+                    _sectionTitle('¿Quien lo recibió?'),
+                    DropdownButtonFormField<String>(
+                      value: _opcionSeleccionada,
+                      decoration: _input('Parentesco'),
+                      items: _opciones.map((op) => DropdownMenuItem(value: op, child: Text(op))).toList(),
+                      onChanged: (v) => setState(() => _opcionSeleccionada = v!),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _quienRecibeController,
+                      decoration: _input('Nombre de quien recibe'),
+                    ),
+
+                    const SizedBox(height: 16),
+                    _sectionTitle('Captura de Evidencia'),
+
+                    _dashedBox(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 8),
+                          const Icon(Icons.upload_rounded, size: 42, color: Colors.black87),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Selecciona o arrastra tus imágenes o video\nPeso máximo 10MB',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12, color: Colors.black87),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => _seleccionarImagen(0),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    side: const BorderSide(color: brand),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  child: const Text('Tomar Fotografía', style: TextStyle(fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: () => _seleccionarImagen(1),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: brand,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  child: const Text('Archivos Galería', style: TextStyle(fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                      ),
+                    ),
+
+                    if (_imagenes.any((f) => f != null)) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: List.generate(3, _thumb),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    _sectionTitle('Nota Extra'),
+                    TextField(
+                      controller: _notaController,
+                      maxLines: 4,
+                      decoration: _input('Escribe tus observaciones...'),
+                    ),
+
+                    if (_guiasMulti.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _sectionTitle('Guías asociadas'),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE6E6E6)),
+                        ),
+                        child: Column(
+                          children: _guiasMulti
+                              .map((id) => ListTile(
+                                    dense: true,
+                                    leading: const Icon(Icons.qr_code_2_outlined),
+                                    title: Text(id),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ),
-            if (_guiasMulti.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              const Text('📋 Guías asociadas:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Column(
-                children: _guiasMulti
-                    .map((id) => ListTile(
-                          leading: const Icon(Icons.qr_code),
-                          title: Text(id),
-                        ))
-                    .toList(),
-              ),
-            ],
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                final timestamp = DateTime.now();
 
-                final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
-                final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
+              const SizedBox(height: 14),
 
-                final recibe = _quienRecibeController.text.trim();
-                final parentesco = _opcionSeleccionada;
-                final nota = _notaController.text.trim();
-                final alMenosUnaFoto = _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
-                final estadoFoto = alMenosUnaFoto ? "el usuario dejó tomarse la foto" : "el usuario no se dejó tomar la foto";
+              // ---- BOTÓN PRIMARIO (Guardar) ----
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    // ---------- LÓGICA ORIGINAL (NO TOCAR) ----------
+                    final timestamp = DateTime.now();
+                    final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
+                    final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
 
-                final textoNota = "Recibe: $parentesco con nombre $recibe, $estadoFoto"
-                    "${nota.isNotEmpty ? ', $nota' : ''}";
+                    final recibe = _quienRecibeController.text.trim();
+                    final parentesco = _opcionSeleccionada;
+                    final nota = _notaController.text.trim();
 
-                // Asigna NombreEmpresa dinámicamente según idEmpresa
-                String nombreEmpresa;
-                if (_idEmpresa == "001000000000000001") {
-                  nombreEmpresa = "Primebox";
-                } else if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
-                  nombreEmpresa = "Liverpol";
-                } else {
-                  nombreEmpresa = "Primebox";
-                }
+                    final alMenosUnaFoto = _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+                    final estadoFoto = alMenosUnaFoto
+                        ? "el usuario dejó tomarse la foto"
+                        : "el usuario no se dejó tomar la foto";
 
-                final body = {
-                  "Direccion": "", // Ya no se obtiene dirección
-                  "FechaEstatus": timestamp.millisecondsSinceEpoch,
-                  "Foto1": _urlImagen1 ?? "",
-                  "Foto2": _urlImagen2 ?? "",
-                  "Foto3": _urlImagen3 ?? "",
-                  "Latitude": _posicionActual?.latitude.toString() ?? "",
-                  "Longitude": _posicionActual?.longitude.toString() ?? "",
-                  "NombreDriver": globalNombre ?? "SinNombre",
-                  "NombreEmpresa": nombreEmpresa,
-                  "NombrePaquete": widget.id,
-                  "Nota": textoNota,
-                  "Parentesco": _opcionSeleccionada,
-                  "Recibe": _quienRecibeController.text.trim(),
-                  "YYYYMMDD": yyyyMMdd,
-                  "YYYYMMDDHHmmss": yyyyMMddHHmmss,
-                  "idCiudad": globalIdCiudad ?? "SinCiudad",
-                  "idDriver": globalUserId ?? "",
-                  "idEmpresa": _idEmpresa ?? "",
-                  "idMovimiento": DateTime.now().millisecondsSinceEpoch.toString(),
-                  "idPaquete": widget.id,
-                  "Data": _guiasMulti,
-                };
+                    final textoNota = "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
 
-                try {
-                  String webhookUrl;
-
-                  if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
-                    if (_guiasMulti.isEmpty) {
-                      webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_hwhq3BLz8GVSUsEkaJYUks";
+                    String nombreEmpresa;
+                    if (_idEmpresa == "001000000000000001") {
+                      nombreEmpresa = "Primebox";
+                    } else if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
+                      nombreEmpresa = "Liverpol";
                     } else {
-                      webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fSt1DHBUxEf2tZ2iV9nVNW";
+                      nombreEmpresa = "Primebox";
                     }
-                  } else {
-                    webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_5LWiKvLL1QnGygESVmGXFV";
-                  }
 
-                  final response = await http.post(
-                    Uri.parse(webhookUrl),
-                    headers: {
-                      HttpHeaders.contentTypeHeader: 'application/json',
-                    },
-                    body: jsonEncode(body),
-                  );
+                    final body = {
+                      "Direccion": "",
+                      "FechaEstatus": timestamp.millisecondsSinceEpoch,
+                      "Foto1": _urlImagen1 ?? "",
+                      "Foto2": _urlImagen2 ?? "",
+                      "Foto3": _urlImagen3 ?? "",
+                      "Latitude": _posicionActual?.latitude.toString() ?? "",
+                      "Longitude": _posicionActual?.longitude.toString() ?? "",
+                      "NombreDriver": globalNombre ?? "SinNombre",
+                      "NombreEmpresa": nombreEmpresa,
+                      "NombrePaquete": widget.id,
+                      "Nota": textoNota,
+                      "Parentesco": parentesco,
+                      "Recibe": recibe,
+                      "YYYYMMDD": yyyyMMdd,
+                      "YYYYMMDDHHmmss": yyyyMMddHHmmss,
+                      "idCiudad": globalIdCiudad ?? "SinCiudad",
+                      "idDriver": globalUserId ?? "",
+                      "idEmpresa": _idEmpresa ?? "",
+                      "idMovimiento": DateTime.now().millisecondsSinceEpoch.toString(),
+                      "idPaquete": widget.id,
+                      "Data": _guiasMulti,
+                    };
 
-                  print('STATUS: ${response.statusCode}');
-                  print('BODY: ${response.body}');
+                    try {
+                      String webhookUrl;
+                      if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
+                        if (_guiasMulti.isEmpty) {
+                          webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_hwhq3BLz8GVSUsEkaJYUks";
+                        } else {
+                          webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fSt1DHBUxEf2tZ2iV9nVNW";
+                        }
+                      } else {
+                        webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_5LWiKvLL1QnGygESVmGXFV";
+                      }
 
-                  if (response.statusCode == 200) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Información enviada exitosamente')),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error al enviar: ${response.body}')),
-                    );
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error de red: $e')),
-                  );
-                }
+                      final response = await http.post(
+                        Uri.parse(webhookUrl),
+                        headers: {HttpHeaders.contentTypeHeader: 'application/json'},
+                        body: jsonEncode(body),
+                      );
 
-                Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text(
-                'Cerrar sin firma',
-                style: TextStyle(color: Colors.white),
+                      if (!mounted) return;
+
+                      if (response.statusCode == 200) {
+                        _snack('Información enviada exitosamente');
+                      } else {
+                        _snack('Error al enviar: ${response.body}');
+                      }
+                    } catch (e) {
+                      if (!mounted) return;
+                      _snack('Error de red: $e');
+                    }
+
+                    if (mounted) Navigator.pop(context);
+                    // ---------- FIN LÓGICA ORIGINAL ----------
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: brand,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                    elevation: 0,
+                  ),
+                  child: const Text('Guardar'),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+// ---------------- Painter de borde punteado ----------------
+class _DashedRectPainter extends CustomPainter {
+  final Color color;
+  final double strokeWidth;
+  final double dashWidth;
+  final double dashSpace;
+  final double radius;
+
+  _DashedRectPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.dashWidth,
+    required this.dashSpace,
+    required this.radius,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    final double w = size.width;
+    final double h = size.height;
+    final double r = radius;
+
+    // Líneas rectas
+    void drawDashedLine(Offset start, Offset end) {
+      final bool isHorizontal = start.dy == end.dy;
+      final double length = isHorizontal ? (end.dx - start.dx).abs() : (end.dy - start.dy).abs();
+      double drawn = 0.0;
+      while (drawn < length) {
+        final double next = ((drawn + dashWidth).clamp(0.0, length)).toDouble();
+        final Offset p1 = isHorizontal ? Offset(start.dx + drawn, start.dy) : Offset(start.dx, start.dy + drawn);
+        final Offset p2 = isHorizontal ? Offset(start.dx + next, start.dy) : Offset(start.dx, start.dy + next);
+        canvas.drawLine(p1, p2, paint);
+        drawn += dashWidth + dashSpace;
+      }
+    }
+
+    // Lados (dejamos hueco r en esquinas para formar el radio)
+    drawDashedLine(Offset(r, 0), Offset(w - r, 0)); // top
+    drawDashedLine(Offset(w, r), Offset(w, h - r)); // right
+    drawDashedLine(Offset(w - r, h), Offset(r, h)); // bottom
+    drawDashedLine(Offset(0, h - r), Offset(0, r)); // left
+
+    // Esquinas: aproximamos arcos con segmentos
+    void drawDashedArc(Rect rect, double startAngle, double sweep) {
+      final path = Path()..addArc(rect, startAngle, sweep);
+      for (final metric in path.computeMetrics()) {
+        double distance = 0.0;
+        while (distance < metric.length) {
+          final double next = ((distance + dashWidth).clamp(0.0, metric.length)).toDouble();
+          final extract = metric.extractPath(distance, next);
+          canvas.drawPath(extract, paint);
+          distance += dashWidth + dashSpace;
+        }
+      }
+    }
+
+    drawDashedArc(Rect.fromCircle(center: Offset(r, r), radius: r), math.pi, math.pi / 2); // top-left
+    drawDashedArc(Rect.fromCircle(center: Offset(w - r, r), radius: r), -math.pi / 2, math.pi / 2); // top-right
+    drawDashedArc(Rect.fromCircle(center: Offset(w - r, h - r), radius: r), 0, math.pi / 2); // bottom-right
+    drawDashedArc(Rect.fromCircle(center: Offset(r, h - r), radius: r), math.pi / 2, math.pi / 2); // bottom-left
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRectPainter old) =>
+      old.color != color ||
+      old.strokeWidth != strokeWidth ||
+      old.dashWidth != dashWidth ||
+      old.dashSpace != dashSpace ||
+      old.radius != radius;
 }
