@@ -12,16 +12,12 @@ import 'package:path/path.dart' as path;
 import 'login_page.dart'; // ya lo estás haciendo 👍
 import 'package:firebase_database/firebase_database.dart';
 
-
-
-
 import 'fallidas_multientrega_page.dart';
 
 class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
   final String tnReference;
   final String destinatario;
-  
 
   const EntregaFallidaPage({
     super.key,
@@ -41,9 +37,7 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   List<String> _guiasFallidas = [];
   String? _idEmpresa;
 
-
   String _motivo = 'Titular ausente';
-  String? _direccionActual;
 
   final List<String> _motivos = [
     'Titular ausente',
@@ -58,15 +52,15 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   @override
   void initState() {
     super.initState();
-    _obtenerUbicacionYDireccion();
+    _obtenerUbicacion(); // Solo permisos y verificación de GPS; sin geocoding
     _obtenerIdEmpresa();
   }
 
-  Future<void> _obtenerUbicacionYDireccion() async {
+  Future<void> _obtenerUbicacion() async {
     final status = await Permission.location.request();
 
     if (status.isGranted) {
-      bool servicioActivo = await Geolocator.isLocationServiceEnabled();
+      final servicioActivo = await Geolocator.isLocationServiceEnabled();
       if (!servicioActivo) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Activa el GPS del dispositivo.')),
@@ -74,12 +68,9 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
         return;
       }
 
+      // Opcional: “calentar” la ubicación (no guardamos dirección)
       try {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-        );
-
-        await _obtenerDireccionDesdeCoordenadas(position.latitude, position.longitude);
+        await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al obtener ubicación: $e')),
@@ -89,7 +80,8 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       openAppSettings();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.')),
+          content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en ajustes.'),
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -99,68 +91,44 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   }
 
   Future<void> _obtenerIdEmpresa() async {
-  final id = Uri.decodeFull(widget.tnReference);
-  final snapshot = await FirebaseDatabase.instance
-      .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$id')
-      .get();
+    final id = Uri.decodeFull(widget.tnReference);
+    final snapshot = await FirebaseDatabase.instance
+        .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$id')
+        .get();
 
-  if (snapshot.exists) {
-    final empresa = snapshot.child('idEmpresa').value?.toString();
-    setState(() {
-      _idEmpresa = empresa ?? 'NoRegistrado';
-    });
-  } else {
-    setState(() {
-      _idEmpresa = 'NoRegistrado';
-    });
+    if (snapshot.exists) {
+      final empresa = snapshot.child('idEmpresa').value?.toString();
+      setState(() {
+        _idEmpresa = empresa ?? 'NoRegistrado';
+      });
+    } else {
+      setState(() {
+        _idEmpresa = 'NoRegistrado';
+      });
+    }
   }
-}
-
 
   Future<void> _subirImagenAFirebase(File image) async {
-  try {
-    final fileName = path.basename(image.path);
-    final ref = FirebaseStorage.instance
-        .ref()
-        .child('imagenesfallidas')
-        .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
+    try {
+      final fileName = path.basename(image.path);
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('imagenesfallidas')
+          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
 
-    final uploadTask = await ref.putFile(image);
-    final url = await ref.getDownloadURL();
+      await ref.putFile(image);
+      final url = await ref.getDownloadURL();
 
-    setState(() {
-      _urlImagen = url;
-    });
+      setState(() {
+        _urlImagen = url;
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Imagen subida correctamente')),
-    );
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error al subir imagen: $e')),
-    );
-  }
-}
-
-
-  Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
-    const apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
-    final url =
-        'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
-
-    final response = await http.get(Uri.parse(url));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      if (data['results'] != null && data['results'].isNotEmpty) {
-        final direccion = data['results'][0]['formatted_address'];
-        setState(() {
-          _direccionActual = direccion;
-        });
-      }
-    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo obtener la dirección')),
+        const SnackBar(content: Text('Imagen subida correctamente')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al subir imagen: $e')),
       );
     }
   }
@@ -199,13 +167,12 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.gallery);
                   if (picked != null) {
-                    File imageFile = File(picked.path);
+                    final imageFile = File(picked.path);
                     setState(() {
                       _imagenes[0] = imageFile;
                     });
                     await _subirImagenAFirebase(imageFile);
                   }
-
                 }
               },
             ),
@@ -218,13 +185,12 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 if (status.isGranted) {
                   final picked = await picker.pickImage(source: ImageSource.camera);
                   if (picked != null) {
-                      File imageFile = File(picked.path);
-                      setState(() {
-                        _imagenes[0] = imageFile;
-                      });
-                      await _subirImagenAFirebase(imageFile);
-                    }
-
+                    final imageFile = File(picked.path);
+                    setState(() {
+                      _imagenes[0] = imageFile;
+                    });
+                    await _subirImagenAFirebase(imageFile);
+                  }
                 }
               },
             ),
@@ -255,7 +221,6 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                 });
               }
             },
-            
             child: const Text(
               'MultiEntrega',
               style: TextStyle(color: Colors.white),
@@ -283,17 +248,16 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
             const SizedBox(height: 12),
             Text('👤 Titular: ${widget.destinatario}'),
             Text('🔢 TnReference: ${widget.tnReference}'),
-            if (_direccionActual != null) ...[
-              const SizedBox(height: 12),
-              Text('📍 Dirección actual: $_direccionActual'),
-            ],
             const SizedBox(height: 20),
-            const Text('Motivo de entrega fallida:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Motivo de entrega fallida:',
+                style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
               value: _motivo,
               decoration: const InputDecoration(border: OutlineInputBorder()),
-              items: _motivos.map((mot) => DropdownMenuItem(value: mot, child: Text(mot))).toList(),
+              items: _motivos
+                  .map((mot) => DropdownMenuItem(value: mot, child: Text(mot)))
+                  .toList(),
               onChanged: (value) {
                 setState(() {
                   _motivo = value!;
@@ -319,20 +283,19 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
               ),
             ),
             if (_guiasFallidas.isNotEmpty) ...[
-  const SizedBox(height: 30),
-  const Text('📋 Guías fallidas registradas:',
-      style: TextStyle(fontWeight: FontWeight.bold)),
-  const SizedBox(height: 8),
-  Column(
-    children: _guiasFallidas
-        .map((id) => ListTile(
-              leading: const Icon(Icons.qr_code),
-              title: Text(id),
-            ))
-        .toList(),
-  ),
-],
-
+              const SizedBox(height: 30),
+              const Text('📋 Guías fallidas registradas:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Column(
+                children: _guiasFallidas
+                    .map((id) => ListTile(
+                          leading: const Icon(Icons.qr_code),
+                          title: Text(id),
+                        ))
+                    .toList(),
+              ),
+            ],
             const SizedBox(height: 20),
             const Text('📝 Nota extra:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -346,97 +309,93 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
             ),
             const SizedBox(height: 30),
             ElevatedButton(
-onPressed: () async {
-final idPaquete = widget.tnReference;
-final DatabaseReference ref = FirebaseDatabase.instance.ref(
-  "projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idPaquete",
-);
+              onPressed: () async {
+                final idPaquete = widget.tnReference;
+                final DatabaseReference ref = FirebaseDatabase.instance.ref(
+                  "projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idPaquete",
+                );
 
+                try {
+                  final snapshot = await ref.child('Fallos').get();
+                  int intento = 1;
 
-  try {
-    final snapshot = await ref.child('Fallos').get();
-    int intento = 1;
+                  if (snapshot.exists) {
+                    final valor = snapshot.value;
+                    intento = int.tryParse(valor.toString()) != null
+                        ? int.parse(valor.toString()) + 1
+                        : 1;
+                  }
 
-    if (snapshot.exists) {
-      final valor = snapshot.value;
-      intento = int.tryParse(valor.toString()) != null ? int.parse(valor.toString()) + 1 : 1;
-    }
+                  final codigoFalla = 'FL$intento';
+                  final fechaAhora = DateTime.now();
+                  final yyyyMMddHHmmss =
+                      '${fechaAhora.year.toString().padLeft(4, '0')}'
+                      '${fechaAhora.month.toString().padLeft(2, '0')}'
+                      '${fechaAhora.day.toString().padLeft(2, '0')}'
+                      '${fechaAhora.hour.toString().padLeft(2, '0')}'
+                      '${fechaAhora.minute.toString().padLeft(2, '0')}'
+                      '${fechaAhora.second.toString().padLeft(2, '0')}';
 
-    final codigoFalla = 'FL$intento';
-    final fechaAhora = DateTime.now();
-    final yyyyMMddHHmmss = '${fechaAhora.year.toString().padLeft(4, '0')}'
-        '${fechaAhora.month.toString().padLeft(2, '0')}'
-        '${fechaAhora.day.toString().padLeft(2, '0')}'
-        '${fechaAhora.hour.toString().padLeft(2, '0')}'
-        '${fechaAhora.minute.toString().padLeft(2, '0')}'
-        '${fechaAhora.second.toString().padLeft(2, '0')}';
+                  // 🔸 UPDATE parcial en Firebase
+                  await ref.update({
+                    'Estatus': codigoFalla,
+                    'Fallos': intento,
+                    'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
+                  });
 
-    // 🔸 Actualizar Firebase solo con los campos indicados (UPDATE parcial)
-    await ref.update({
-      'Estatus': codigoFalla,
-      'Fallos': intento,
-      'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
-    });
+                  // 🔸 Ubicación (lat/lng) sin geocoding
+                  final Position posicion = await Geolocator.getCurrentPosition(
+                    desiredAccuracy: LocationAccuracy.high,
+                  );
 
-    // 🔸 Enviar al Webhook
-    final Position posicion = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+                  final now = DateTime.now();
+                  final yyyyMMdd =
+                      '${now.year.toString().padLeft(4, '0')}-'
+                      '${now.month.toString().padLeft(2, '0')}-'
+                      '${now.day.toString().padLeft(2, '0')}';
 
-    final now = DateTime.now();
+                  final Map<String, dynamic> body = {
+                    "CodigoFalla": codigoFalla,
+                    "Direccion": "", // Se elimina geocoding, va vacío
+                    "FotoEvidencia": _urlImagen ?? "",
+                    "Intentos": intento,
+                    "Latitude": posicion.latitude.toString(),
+                    "Longitude": posicion.longitude.toString(),
+                    "MotivoFallo": _motivo,
+                    "NombreDriver": globalNombre ?? "SinNombre",
+                    "NombrePaquete": idPaquete,
+                    "tnReference": widget.tnReference,
+                    "idPaquete": idPaquete,
+                    "Timestamp": DateTime.now().millisecondsSinceEpoch,
+                    "idConductor": globalUserId ?? "",
+                    "idEmpresa": _idEmpresa ?? "",
+                    "data": _guiasFallidas,
+                    "YYYYMMDD": yyyyMMdd,
+                    "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
+                  };
 
-final yyyyMMdd = '${now.year.toString().padLeft(4, '0')}-'
-                 '${now.month.toString().padLeft(2, '0')}-'
-                 '${now.day.toString().padLeft(2, '0')}';
+                  final response = await http.post(
+                    Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_bzSiG1tauvQ5us7gtyQKEd'),
+                    headers: {HttpHeaders.contentTypeHeader: 'application/json'},
+                    body: jsonEncode(body),
+                  );
 
-
-
-
-
-
-    final Map<String, dynamic> body = {
-      "CodigoFalla": codigoFalla,
-      "Direccion": _direccionActual ?? "",
-      "FotoEvidencia": _urlImagen ?? "",
-      "Intentos": intento,
-      "Latitude": posicion.latitude.toString(),
-      "Longitude": posicion.longitude.toString(),
-      "MotivoFallo": _motivo,
-      "NombreDriver": globalNombre ?? "SinNombre",
-      "NombrePaquete": idPaquete,
-      "tnReference": widget.tnReference,
-      "idPaquete" : idPaquete,
-      "Timestamp": DateTime.now().millisecondsSinceEpoch,
-      "idConductor": globalUserId ?? "",
-      "idEmpresa": _idEmpresa ?? "",
-      "data": _guiasFallidas,
-      "YYYYMMDD": yyyyMMdd,
-      "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
-    };
-
-    final response = await http.post(
-      Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_bzSiG1tauvQ5us7gtyQKEd'),
-      headers: {HttpHeaders.contentTypeHeader: 'application/json'},
-      body: jsonEncode(body),
-    );
-
-    if (response.statusCode == 200) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Entrega fallida registrada correctamente')),
-      );
-      Navigator.pop(context);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al enviar webhook: ${response.body}')),
-      );
-    }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Ocurrió un error: $e')),
-    );
-  }
-},
-
+                  if (response.statusCode == 200) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Entrega fallida registrada correctamente')),
+                    );
+                    Navigator.pop(context);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error al enviar webhook: ${response.body}')),
+                    );
+                  }
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Ocurrió un error: $e')),
+                  );
+                }
+              },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               child: const Text('Guardar', style: TextStyle(color: Colors.white)),
             ),

@@ -39,7 +39,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   final TextEditingController _quienRecibeController = TextEditingController();
   final TextEditingController _notaController = TextEditingController();
   String _opcionSeleccionada = 'Titular';
-  String? _direccionActual;
   Position? _posicionActual;
   String? _idEmpresa;
   String? _urlImagen1;
@@ -85,8 +84,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         setState(() {
           _posicionActual = position;
         });
-
-        await _obtenerDireccionDesdeCoordenadas(position.latitude, position.longitude);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al obtener ubicación: $e')),
@@ -121,27 +118,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       setState(() {
         _idEmpresa = 'No existe el código de empresa';
       });
-    }
-  }
-
-  Future<void> _obtenerDireccionDesdeCoordenadas(double lat, double lng) async {
-    final apiKey = 'AIzaSyDPvwJ5FfLTSE8iL4E4VWmkVmj6n4CvXok';
-    final url = 'https://maps.googleapis.com/maps/api/geocode/json?latlng=$lat,$lng&key=$apiKey';
-
-    final response = await http.get(Uri.parse(url));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      if (data['results'] != null && data['results'].isNotEmpty) {
-        final direccion = data['results'][0]['formatted_address'];
-        setState(() {
-          _direccionActual = direccion;
-        });
-      }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo obtener dirección')),
-      );
     }
   }
 
@@ -213,7 +189,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       const SnackBar(
         content: Text('La imagen se está cargando…'),
         behavior: SnackBarBehavior.floating,
-        duration: Duration(days: 1), // práctica: "infinito" hasta ocultar
+        duration: Duration(days: 1), // práctico: "infinito" hasta ocultar
       ),
     );
     // ----------------------------------
@@ -225,7 +201,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           .child('imagenesaplicacion')
           .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
 
-      final uploadTask = await ref.putFile(image);
+      await ref.putFile(image);
       final url = await ref.getDownloadURL();
 
       setState(() {
@@ -306,10 +282,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
             const SizedBox(height: 12),
             Text('👤 Titular: ${widget.destinatario}'),
             Text('🔢 TnReference: ${widget.tnReference}'),
-            if (_direccionActual != null) ...[
-              const SizedBox(height: 12),
-              Text('📍 Dirección actual: $_direccionActual'),
-            ],
             if (_idEmpresa != null) ...[
               const SizedBox(height: 8),
               Text('🏢 Empresa: $_idEmpresa'),
@@ -422,7 +394,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 }
 
                 final body = {
-                  "Direccion": _direccionActual ?? "",
+                  "Direccion": "", // Ya no se obtiene dirección
                   "FechaEstatus": timestamp.millisecondsSinceEpoch,
                   "Foto1": _urlImagen1 ?? "",
                   "Foto2": _urlImagen2 ?? "",
