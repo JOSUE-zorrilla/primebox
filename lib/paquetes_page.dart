@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
+import 'escanear_paquete_page.dart';
 
 import 'perfil_page.dart';
 import 'paqueteDetallePage.dart';
@@ -544,10 +545,16 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                 onTap: _abrirFiltroTipo,
                               ),
                               const SizedBox(width: 10),
-                              _SquareIconButton(
-                                icon: Icons.grid_view_rounded,
-                                onTap: () {}, // decorativo
-                              ),
+                             _SquareIconButton(
+  icon: Icons.grid_view_rounded,
+  onTap: () async {
+    if (!_requerirConexion()) return;              // debe estar conectado
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
+    );
+  },
+),
                             ],
                           ),
                         ],
