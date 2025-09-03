@@ -39,6 +39,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(), // ✅ explícito
         '/qr': (context) => const QRScannerPage(),
         '/paquetes': (context) => const PaquetesPage(),
+       
       },
     );
   }

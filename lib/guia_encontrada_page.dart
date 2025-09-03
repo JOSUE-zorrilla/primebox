@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
+// NUEVOS IMPORTS (si ya los añadiste, déjalos)
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+
 import 'guia_data.dart';
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
@@ -10,6 +16,85 @@ class GuiaEncontradaPage extends StatelessWidget {
   final GuiaData data;
   const GuiaEncontradaPage({super.key, required this.data});
 
+  // ===== Helpers compartidos =====
+  String _fmt(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
+
+  Future<void> _enviarWebhookRP({
+    required String paqueteId,
+    required String tnReference,
+  }) async {
+    final now = DateTime.now();
+    final nowMs = now.millisecondsSinceEpoch;
+    final estimada = DateTime.fromMillisecondsSinceEpoch(nowMs + 28800000); // +8h
+    final url = Uri.parse(
+        'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_woPgim5JFu1wFjHR21cHnK');
+
+    final body = <String, String>{
+      'Estatus': 'RP',
+      'FechaEstimada': _fmt(estimada),
+      'FechaPush': _fmt(now),
+      'idGuiaLP': tnReference,
+      'idGuiaPM': paqueteId,
+    };
+
+    await http.post(url, body: body);
+  }
+
+  Future<void> _limpiarNotificarRp({
+    required String userId,
+    required String paqueteId,
+  }) async {
+    final ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/$userId/Paquetes/$paqueteId/NotificarRp',
+    );
+    await ref.set(''); // dejarlo vacío (no eliminar)
+  }
+
+  Future<bool> _estaConectado() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+
+    final ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}/EstadoConexion',
+    );
+    final snap = await ref.get();
+    final estado = snap.value?.toString() ?? 'Desconectado';
+    return estado == 'Conectado';
+  }
+
+  Future<bool> _requerirConexion(BuildContext context) async {
+    final ok = await _estaConectado();
+    if (ok) return true;
+
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No estás conectado'),
+          content: const Text('Debes conectarte para gestionar paquetes.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    }
+    return false;
+  }
+
+  void _mostrarAlertaDevolucion(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => const AlertDialog(
+        title: Text('Paquete con múltiples intentos'),
+        content: Text('Este paquete debe ser devuelto al proveedor.'),
+      ),
+    );
+  }
+
+  // ===== WhatsApp =====
   void _abrirWhatsapp(BuildContext context, {String? texto}) async {
     final tel = data.telefono.replaceAll(RegExp(r'[^0-9+]'), '');
     if (tel.isEmpty) {
@@ -39,16 +124,14 @@ class GuiaEncontradaPage extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      // Quitamos AppBar para construir la cabecera custom como en tu diseño
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // ===== CABECERA CUSTOM (como en la imagen) =====
+            // ===== CABECERA CUSTOM =====
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Botón volver: cuadrado azul con esquinas redondeadas
                 InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: () => Navigator.pop(context),
@@ -63,7 +146,6 @@ class GuiaEncontradaPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                // Título centrado relativo
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -85,12 +167,10 @@ class GuiaEncontradaPage extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Espaciador para balancear la fila (mismo ancho que el botón)
                 const SizedBox(width: 36),
               ],
             ),
             const SizedBox(height: 16),
-            // ===== FIN CABECERA =====
 
             _campo('Nombre del cliente:', data.nombreDestinatario),
             _campo('Domicilio:', data.direccionEntrega),
@@ -99,7 +179,7 @@ class GuiaEncontradaPage extends StatelessWidget {
 
             const SizedBox(height: 16),
 
-            // Tarjeta 1: solo texto + botón WhatsApp
+            // Tarjeta 1
             Container(
               decoration: cardStyle,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -124,7 +204,7 @@ class GuiaEncontradaPage extends StatelessWidget {
             ),
             const SizedBox(height: 10),
 
-            // Tarjeta 2: solo texto + botón WhatsApp
+            // Tarjeta 2
             Container(
               decoration: cardStyle,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -150,6 +230,7 @@ class GuiaEncontradaPage extends StatelessWidget {
 
             const SizedBox(height: 24),
 
+            // ===== Entrega exitosa (misma lógica que onEntregar) =====
             SizedBox(
               height: 48,
               child: ElevatedButton(
@@ -157,15 +238,54 @@ class GuiaEncontradaPage extends StatelessWidget {
                   backgroundColor: const Color(0xFF2F63D3),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: () {
+                onPressed: () async {
+                  if (!await _requerirConexion(context)) return;
+
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Sesión no válida. Inicia sesión nuevamente.')),
+                      );
+                    }
+                    return;
+                  }
+
+                  final paqueteRef = FirebaseDatabase.instance.ref(
+                    'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/${data.id}',
+                  );
+
+                  String tnReference = data.tnReference;
+                  String telefono = data.telefono;
+
+                  try {
+                    final snap = await paqueteRef.get();
+                    final notificarRp = snap.child('NotificarRp').value?.toString() ?? '';
+
+                    if (notificarRp.toLowerCase() == 'si') {
+                      tnReference = snap.child('TnReference').value?.toString() ?? tnReference;
+                      await _enviarWebhookRP(paqueteId: data.id, tnReference: tnReference);
+                      await _limpiarNotificarRp(userId: user.uid, paqueteId: data.id);
+                    }
+
+                    telefono = snap.child('Telefono').value?.toString() ?? telefono;
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error al preparar entrega: $e')),
+                      );
+                    }
+                  }
+
+                  if (!context.mounted) return;
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => PaqueteDetallePage(
                         id: data.id,
-                        telefono: data.telefono,
+                        telefono: telefono,
                         destinatario: data.nombreDestinatario,
-                        tnReference: data.tnReference,
+                        tnReference: tnReference,
                       ),
                     ),
                   );
@@ -176,7 +296,10 @@ class GuiaEncontradaPage extends StatelessWidget {
                 ),
               ),
             ),
+
             const SizedBox(height: 12),
+
+            // ===== Entrega fallida (misma lógica que onRechazar) =====
             SizedBox(
               height: 48,
               child: ElevatedButton(
@@ -184,17 +307,72 @@ class GuiaEncontradaPage extends StatelessWidget {
                   backgroundColor: const Color(0xFFE53935),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EntregaFallidaPage(
-                        telefono: data.telefono,
-                        tnReference: data.tnReference,
-                        destinatario: data.nombreDestinatario,
-                      ),
-                    ),
+                onPressed: () async {
+                  if (!await _requerirConexion(context)) return;
+
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) return;
+
+                  final paqueteId = data.id;
+                  final paqueteRef = FirebaseDatabase.instance.ref(
+                    'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
                   );
+
+                  try {
+                    final snapshot = await paqueteRef.get();
+                    final tnReference =
+                        snapshot.child('TnReference').value?.toString() ?? data.tnReference;
+                    final telefono =
+                        snapshot.child('Telefono').value?.toString() ?? data.telefono;
+
+                    // En onRechazar SIEMPRE enviamos RP y luego limpiamos NotificarRp
+                    try {
+                      await _enviarWebhookRP(
+                        paqueteId: paqueteId,
+                        tnReference: tnReference,
+                      );
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error al enviar webhook de rechazo: $e')),
+                        );
+                      }
+                    } finally {
+                      await _limpiarNotificarRp(
+                        userId: user.uid,
+                        paqueteId: paqueteId,
+                      );
+                    }
+
+                    // Revisar intentos
+                    final intentosRaw = snapshot.child('Intentos').value;
+                    final int intentos = intentosRaw is int
+                        ? intentosRaw
+                        : int.tryParse(intentosRaw?.toString() ?? '') ?? 0;
+
+                    if (intentos >= 3) {
+                      _mostrarAlertaDevolucion(context);
+                      return;
+                    }
+
+                    if (!context.mounted) return;
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EntregaFallidaPage(
+                          telefono: telefono,
+                          tnReference: tnReference,
+                          destinatario: data.nombreDestinatario,
+                        ),
+                      ),
+                    );
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error al preparar rechazo: $e')),
+                      );
+                    }
+                  }
                 },
                 child: const Text(
                   'Entrega fallida',

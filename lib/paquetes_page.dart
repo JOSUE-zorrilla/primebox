@@ -6,12 +6,14 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
-import 'escanear_paquete_page.dart';
 
+import 'escanear_paquete_page.dart';
 import 'perfil_page.dart';
 import 'paqueteDetallePage.dart';
 import 'entrega_fallida_page.dart';
 import 'login_page.dart'; // para globalNombre / globalUserId si los tienes
+import 'package:shared_preferences/shared_preferences.dart';
+import 'recolectar_tiendas_page.dart';
 
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
@@ -21,6 +23,7 @@ class PaquetesPage extends StatefulWidget {
 }
 
 class _PaquetesPageState extends State<PaquetesPage> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>(); // << Drawer
   final List<Map<String, dynamic>> _paquetes = [];
   List<Map<String, dynamic>> _paquetesFiltrados = [];
   final TextEditingController _searchController = TextEditingController();
@@ -35,7 +38,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
   late DatabaseReference _estadoConexionRef;
   StreamSubscription<DatabaseEvent>? _estadoConexionSub;
 
-  // NUEVO: suscripción en tiempo real a Paquetes
+  // suscripción en tiempo real a Paquetes
   StreamSubscription<DatabaseEvent>? _paquetesSub;
   DatabaseReference? _paquetesRef;
 
@@ -44,7 +47,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
     super.initState();
     _searchController.addListener(_filtrarPaquetes);
     _escucharEstadoConexion();
-    _suscribirsePaquetes(); // ahora en tiempo real
+    _suscribirsePaquetes();
   }
 
   @override
@@ -54,6 +57,16 @@ class _PaquetesPageState extends State<PaquetesPage> {
     _searchController.dispose();
     super.dispose();
   }
+
+  void _irARecolectarTiendas() {
+  // Debe estar conectado
+  if (!_requerirConexion()) return;
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const RecolectarTiendasPage()),
+  );
+}
 
   // =============== Utilidades de tiempo ===============
   String _fmt(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
@@ -198,12 +211,13 @@ class _PaquetesPageState extends State<PaquetesPage> {
       }
 
       final fecha = _fmt(DateTime.now());
+      final userAuth = FirebaseAuth.instance.currentUser!;
       final nombreDriver = (globalNombre?.toString().trim().isNotEmpty ?? false)
           ? globalNombre!
-          : (user.displayName ?? 'SinNombre');
+          : (userAuth.displayName ?? 'SinNombre');
       final idDriver = (globalUserId?.toString().trim().isNotEmpty ?? false)
           ? globalUserId!
-          : user.uid;
+          : userAuth.uid;
 
       final Map<String, String> base = {
         'Latitude': pos.latitude.toString(),
@@ -229,7 +243,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final nuevoEstado = estabaConectado ? 'Desconectado' : 'Conectado';
         final conductorRef = FirebaseDatabase.instance.ref(
-          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}/EstadoConexion',
+          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${userAuth.uid}/EstadoConexion',
         );
         await conductorRef.set(nuevoEstado);
         if (mounted) {
@@ -288,34 +302,22 @@ class _PaquetesPageState extends State<PaquetesPage> {
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes',
     );
 
-    // Cancelar suscripción previa si existe
     await _paquetesSub?.cancel();
-
-    // Primer estado: loading true hasta recibir el primer snapshot
     if (mounted) setState(() => _loading = true);
 
     _paquetesSub = _paquetesRef!.onValue.listen((DatabaseEvent event) {
       final snap = event.snapshot;
 
       if (!snap.exists || snap.value == null) {
-        // No hay paquetes
-        _paquetes
-          ..clear();
+        _paquetes..clear();
         _paquetesFiltrados = [];
-        if (mounted) {
-          setState(() {
-            _loading = false;
-          });
-        }
+        if (mounted) setState(() => _loading = false);
         return;
       }
 
       final value = snap.value;
-
-      // Esperamos un Map<dynamic, dynamic> { idPaquete: { ...datos } }
       if (value is Map) {
         final List<Map<String, dynamic>> lista = [];
-
         value.forEach((key, dynamic paquete) {
           if (paquete is Map) {
             lista.add({
@@ -328,41 +330,19 @@ class _PaquetesPageState extends State<PaquetesPage> {
           }
         });
 
-        // Orden opcional por id o por algo más si lo necesitas
-        // lista.sort((a, b) => a['id'].toString().compareTo(b['id'].toString()));
-
-        _paquetes
-          ..clear()
-          ..addAll(lista);
-
-        // Reaplicar filtros y búsqueda
+        _paquetes..clear()..addAll(lista);
         _aplicarFiltrosEnMemoria();
-
-        if (mounted) {
-          setState(() {
-            _loading = false;
-          });
-        }
+        if (mounted) setState(() => _loading = false);
       } else {
-        // Estructura inesperada
-        _paquetes
-          ..clear();
+        _paquetes..clear();
         _paquetesFiltrados = [];
-        if (mounted) {
-          setState(() {
-            _loading = false;
-          });
-        }
+        if (mounted) setState(() => _loading = false);
       }
     }, onError: (e) {
-      // En caso de error en el stream, mostramos estado vacío pero dejamos el listener activo
-      _paquetes
-        ..clear();
+      _paquetes..clear();
       _paquetesFiltrados = [];
       if (mounted) {
-        setState(() {
-          _loading = false;
-        });
+        setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al escuchar paquetes: $e')),
         );
@@ -371,7 +351,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
   }
 
   void _aplicarFiltrosEnMemoria() {
-    // Aplica filtro por tipo y búsqueda actual sin pedir de nuevo
     final query = _searchController.text.toLowerCase();
     List<Map<String, dynamic>> base = [..._paquetes];
 
@@ -393,7 +372,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
   // =============== Cerrar sesión ===============
   Future<void> _cerrarSesion() async {
     await FirebaseAuth.instance.signOut();
-    // Cancelar suscripciones por seguridad
     await _paquetesSub?.cancel();
     await _estadoConexionSub?.cancel();
 
@@ -419,7 +397,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
   }) async {
     final now = DateTime.now();
     final nowMs = now.millisecondsSinceEpoch;
-    final estimada = DateTime.fromMillisecondsSinceEpoch(nowMs + 28800000); // +8h en ms
+    final estimada = DateTime.fromMillisecondsSinceEpoch(nowMs + 28800000); // +8h
 
     final url = Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_woPgim5JFu1wFjHR21cHnK');
 
@@ -441,16 +419,166 @@ class _PaquetesPageState extends State<PaquetesPage> {
     final ref = FirebaseDatabase.instance.ref(
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/$userId/Paquetes/$paqueteId/NotificarRp',
     );
-    await ref.set(''); // dejarlo vacío (no eliminar)
+    await ref.set('');
+  }
+
+  // ======== Drawer ========
+  Drawer _buildDrawer(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final nombre = (globalNombre?.trim().isNotEmpty ?? false)
+        ? globalNombre!
+        : (user?.displayName ?? 'Usuario');
+    final foto = user?.photoURL;
+
+    Widget header = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundImage: (foto != null && foto.isNotEmpty)
+                ? NetworkImage(foto)
+                : null,
+            child: (foto == null || foto.isEmpty)
+                ? const Icon(Icons.person, color: Colors.white)
+                : null,
+            backgroundColor: const Color(0xFF2A6AE8),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Perfil', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(
+                  nombre,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                ),
+                const SizedBox(height: 6),
+                Container(height: 1, color: Colors.black12),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+
+    ListTile item({
+      required IconData icon,
+      required String text,
+      Color? iconColor,
+      VoidCallback? onTap,
+    }) {
+      return ListTile(
+        leading: Icon(icon, color: iconColor ?? const Color(0xFF1A3365)),
+        title: Text(text),
+        onTap: () async {
+          Navigator.pop(context); // cerrar el drawer primero
+          if (onTap != null) onTap();
+        },
+      );
+    }
+
+    void _proximamente(String nombre) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$nombre: próximamente')),
+      );
+    }
+
+    return Drawer(
+      width: 290,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            header,
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  item(
+                    icon: Icons.notifications_none_rounded,
+                    text: 'Notificaciones',
+                    onTap: () => _proximamente('Notificaciones'),
+                  ),
+                  item(
+                    icon: Icons.store_mall_directory_outlined,
+                    text: 'Recolectar en tienda',
+                    onTap: _irARecolectarTiendas,   // << antes ponías "próximamente"
+                  ),
+                  item(
+                    icon: Icons.route_outlined,
+                    text: 'Rutas disponibles',
+                    onTap: () => _proximamente('Rutas disponibles'),
+                  ),
+                  item(
+                    icon: Icons.group_add_outlined,
+                    text: 'Delegar paquete',
+                    onTap: () => _proximamente('Delegar paquete'),
+                  ),
+                  item(
+                    icon: Icons.history_rounded,
+                    text: 'Historial de paquetes',
+                    onTap: () => _proximamente('Historial de paquetes'),
+                  ),
+                  item(
+                    icon: Icons.backup_outlined,
+                    text: 'Evidencia de respaldo',
+                    onTap: () => _proximamente('Evidencia de respaldo'),
+                  ),
+                  item(
+                    icon: Icons.inventory_2_outlined,
+                    text: 'Paquetes recolectados',
+                    onTap: () => _proximamente('Paquetes recolectados'),
+                  ),
+                  item(
+                    icon: Icons.local_shipping_outlined,
+                    text: 'Recoger paquete en almacén',
+                    onTap: () => _proximamente('Recoger paquete en almacén'),
+                  ),
+                  item(
+                    icon: Icons.assignment_return_outlined,
+                    text: 'Devoluciones',
+                    onTap: () => _proximamente('Devoluciones'),
+                  ),
+                  item(
+                    icon: Icons.support_agent_outlined,
+                    text: 'Levantar Ticket',
+                    onTap: () => _proximamente('Levantar Ticket'),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Color(0xFFE53935)),
+              title: const Text(
+                'Salir de la app',
+                style: TextStyle(color: Color(0xFFE53935), fontWeight: FontWeight.w600),
+              ),
+              onTap: _cerrarSesion,
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   // =============== UI ===============
   @override
   Widget build(BuildContext context) {
     const overlay = SystemUiOverlayStyle(
-      statusBarColor: Color(0xFF1955CC),         // mismo color del encabezado
-      statusBarIconBrightness: Brightness.light, // íconos blancos (Android)
-      statusBarBrightness: Brightness.dark,      // íconos blancos (iOS)
+      statusBarColor: Color(0xFF1955CC),
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
     );
 
     final bool conectado = _estaConectado;
@@ -458,6 +586,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
       child: Scaffold(
+        key: _scaffoldKey, // << necesario para openDrawer()
+        drawer: _buildDrawer(context),
         backgroundColor: const Color(0xFFF2F3F7),
         body: SafeArea(
           child: _loading
@@ -469,7 +599,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                       width: double.infinity,
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
                       decoration: const BoxDecoration(
-                        color: Color(0xFF1955CC), // color solicitado
+                        color: Color(0xFF1955CC),
                         borderRadius: BorderRadius.only(
                           bottomLeft: Radius.circular(16),
                           bottomRight: Radius.circular(16),
@@ -482,15 +612,14 @@ class _PaquetesPageState extends State<PaquetesPage> {
                           Row(
                             children: [
                               IconButton(
-                                onPressed: () {},
+                                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
                                 icon: const Icon(Icons.menu, color: Colors.white),
                               ),
                               const Spacer(),
                               TextButton(
                                 onPressed: _procesandoConexion ? null : _alternarEstadoConexion,
                                 style: TextButton.styleFrom(
-                                  backgroundColor:
-                                      conectado ? Colors.white : const Color(0xFF2E7D32),
+                                  backgroundColor: conectado ? Colors.white : const Color(0xFF2E7D32),
                                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
@@ -518,7 +647,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                           ),
                           const SizedBox(height: 12),
 
-                          // Buscador (blanco) + 2 cuadritos en la MISMA FILA
+                          // Buscador + 2 cuadritos en la MISMA FILA
                           Row(
                             children: [
                               Expanded(
@@ -530,7 +659,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                     hintStyle: const TextStyle(color: Colors.black38),
                                     prefixIcon: const Icon(Icons.search, color: Colors.black45),
                                     filled: true,
-                                    fillColor: Colors.white, // fondo blanco
+                                    fillColor: Colors.white,
                                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
@@ -545,16 +674,16 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                 onTap: _abrirFiltroTipo,
                               ),
                               const SizedBox(width: 10),
-                             _SquareIconButton(
-  icon: Icons.grid_view_rounded,
-  onTap: () async {
-    if (!_requerirConexion()) return;              // debe estar conectado
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
-    );
-  },
-),
+                              _SquareIconButton(
+                                icon: Icons.grid_view_rounded,
+                                onTap: () async {
+                                  if (!_requerirConexion()) return;
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
+                                  );
+                                },
+                              ),
                             ],
                           ),
                         ],
@@ -618,7 +747,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                     final telefono = snap.child('Telefono').value?.toString() ?? '';
                                     final notificarRp = snap.child('NotificarRp').value?.toString() ?? '';
 
-                                    // Si NotificarRp == "Si" -> enviar webhook y limpiar campo
                                     if (notificarRp.toLowerCase() == 'si') {
                                       try {
                                         await _enviarWebhookRP(
@@ -669,7 +797,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                     final telefono =
                                         snapshot.child('Telefono').value?.toString() ?? '';
 
-                                    // Rechazar -> enviar MISMA info al MISMO webhook y limpiar
                                     try {
                                       await _enviarWebhookRP(
                                         paqueteId: paqueteId,
@@ -739,8 +866,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 12),
-              const Text('Filtrar por tipo de envío',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const Text('Filtrar por tipo de envío', style: TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               _OpcionFiltro(
                 titulo: 'Todos',
@@ -782,7 +908,7 @@ class _SquareIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF2A6AE8), // cuadrito azul más claro
+      color: const Color(0xFF2A6AE8),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -790,9 +916,7 @@ class _SquareIconButton extends StatelessWidget {
         child: SizedBox(
           width: 40,
           height: 40,
-          child: Center(
-            child: Icon(icon, color: Colors.white),
-          ),
+          child: Center(child: Icon(icon, color: Colors.white)),
         ),
       ),
     );
@@ -803,11 +927,7 @@ class _OpcionFiltro extends StatelessWidget {
   final String titulo;
   final bool seleccionado;
   final VoidCallback onTap;
-  const _OpcionFiltro({
-    required this.titulo,
-    required this.seleccionado,
-    required this.onTap,
-  });
+  const _OpcionFiltro({required this.titulo, required this.seleccionado, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -860,10 +980,7 @@ class _PaqueteCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '#$id',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
+                  child: Text('#$id', style: const TextStyle(fontWeight: FontWeight.w700)),
                 ),
                 if (esEspecial)
                   Container(
@@ -874,10 +991,7 @@ class _PaqueteCard extends StatelessWidget {
                     ),
                     child: Text(
                       tipoEnvio,
-                      style: const TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                     ),
                   ),
               ],
@@ -906,7 +1020,6 @@ class _PaqueteCard extends StatelessWidget {
             Text('Intentos: $intentos'),
             const SizedBox(height: 12),
 
-            // Acciones: Entregado (expande) + rojito
             Row(
               children: [
                 Expanded(
@@ -915,16 +1028,11 @@ class _PaqueteCard extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2F63D3),
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     child: const Text(
                       'Entregado',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
@@ -939,9 +1047,7 @@ class _PaqueteCard extends StatelessWidget {
                       color: const Color(0xFFE53935),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Center(
-                      child: Icon(Icons.error_outline, color: Colors.white),
-                    ),
+                    child: const Center(child: Icon(Icons.error_outline, color: Colors.white)),
                   ),
                 ),
               ],

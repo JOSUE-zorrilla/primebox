@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
+import 'centro_boot_page.dart';
 
 // ✅ Variables globales
 String? globalUserId;
@@ -10,11 +11,13 @@ String? globalNombre;
 String? globalIdCiudad;
 
 // 🎨 Colores de la UI
-const Color kBg = Color(0xFFF2F2F2);        // Fondo
-const Color kTitle = Color(0xFF0F285C);     // Título (azul oscuro)
-const Color kPrimaryBlue300 = Color(0xFF64B5F6); // No se usa porque el botón es 3771E6
-const Color kUnderline = Color(0xFFBDBDBD); // Línea inputs
-const Color kHint = Color(0x99000000);      // Hints / descripciones (60% negro)
+const Color kBg = Color(0xFFF2F2F2);
+const Color kTitle = Color(0xFF0F285C);
+const Color kPrimaryBlue300 = Color(0xFF64B5F6);
+const Color kUnderline = Color(0xFFBDBDBD);
+const Color kHint = Color(0x99000000);
+
+
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -50,7 +53,17 @@ class _LoginPageState extends State<LoginPage> {
         globalUserId = uid;
         await _cargarDatosConductor(uid);
 
-        if (mounted) {
+        if (!mounted) return;
+
+        // 👉 NUEVO: ir a cargar centro antes de paquetes
+        if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const CentroBootPage(nextRoute: '/paquetes'),
+            ),
+          );
+        } else {
           Navigator.pushReplacementNamed(context, '/paquetes');
         }
       } else {
@@ -96,7 +109,17 @@ class _LoginPageState extends State<LoginPage> {
         globalUserId = uid;
         await _cargarDatosConductor(uid);
 
-        if (mounted) {
+        if (!mounted) return;
+
+        // 👉 NUEVO: ir a cargar centro antes de paquetes
+        if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const CentroBootPage(nextRoute: '/paquetes'),
+            ),
+          );
+        } else {
           Navigator.pushReplacementNamed(context, '/paquetes');
         }
       } else {
@@ -127,11 +150,10 @@ class _LoginPageState extends State<LoginPage> {
     final labelLarge = Theme.of(context).textTheme.labelLarge;
     final labelMedium = Theme.of(context).textTheme.labelMedium;
 
-    // 👉 Color e iconos de la barra de estado / navegación
     const overlay = SystemUiOverlayStyle(
       statusBarColor: kBg,
-      statusBarIconBrightness: Brightness.dark, // Android
-      statusBarBrightness: Brightness.light,    // iOS
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
       systemNavigationBarColor: kBg,
       systemNavigationBarIconBrightness: Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
@@ -140,8 +162,6 @@ class _LoginPageState extends State<LoginPage> {
     final size = MediaQuery.of(context).size;
     final padding = MediaQuery.of(context).padding;
     final viewportH = size.height - padding.vertical;
-
-    // “Bienvenido” un poco más abajo
     final topGap = (viewportH * 0.20).clamp(56.0, 220.0).toDouble();
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -156,18 +176,15 @@ class _LoginPageState extends State<LoginPage> {
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween, // 👈 empuja el footer al fondo
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ====== BLOQUE SUPERIOR ======
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 420),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             SizedBox(height: topGap),
-
-                            // 🏷️ Título "Bienvenido" — Montserrat Bold 40
                             Text(
                               'Bienvenido',
                               style: GoogleFonts.montserrat(
@@ -178,17 +195,12 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                             const SizedBox(height: 12),
-
-                            // 📝 Descriptivo — labelLarge
                             Text(
                               'Ingresa tu correo y contraseña para ingresar \na tu cuenta',
                               style: (labelLarge ?? const TextStyle())
                                   .copyWith(color: kHint, height: 1.35),
                             ),
-
                             const SizedBox(height: 28),
-
-                            // 📩 Correo
                             TextField(
                               controller: emailController,
                               keyboardType: TextInputType.emailAddress,
@@ -205,10 +217,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ),
                             ),
-
                             const SizedBox(height: 18),
-
-                            // 🔒 Contraseña
                             TextField(
                               controller: passwordController,
                               obscureText: true,
@@ -225,10 +234,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ),
                             ),
-
                             const SizedBox(height: 24),
-
-                            // 🔵 Botón — 3771E6
                             SizedBox(
                               width: double.infinity,
                               height: 48,
@@ -261,15 +267,10 @@ class _LoginPageState extends State<LoginPage> {
                                       ),
                               ),
                             ),
-
                             const SizedBox(height: 16),
-
-                            // 🔗 Olvidaste tu contraseña
                             Center(
                               child: TextButton(
-                                onPressed: () {
-                                  // TODO: Navegar a recuperación
-                                },
+                                onPressed: () {},
                                 style: TextButton.styleFrom(
                                   foregroundColor: const Color(0xFF3771E6),
                                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -284,10 +285,8 @@ class _LoginPageState extends State<LoginPage> {
                           ],
                         ),
                       ),
-
-                      // ====== FOOTER FIJADO ABAJO ======
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 50.0), // 👈 margen inferior 30
+                        padding: const EdgeInsets.only(bottom: 50.0),
                         child: Center(
                           child: Wrap(
                             crossAxisAlignment: WrapCrossAlignment.center,
@@ -298,9 +297,7 @@ class _LoginPageState extends State<LoginPage> {
                                     .copyWith(color: Colors.black54),
                               ),
                               GestureDetector(
-                                onTap: () {
-                                  // TODO: Navegar a registro
-                                },
+                                onTap: () {},
                                 child: Text(
                                   'Registrarte',
                                   style: (labelMedium ?? const TextStyle()).copyWith(
