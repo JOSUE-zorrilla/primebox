@@ -45,6 +45,7 @@ dependencies:
   intl: ^0.18.0
   google_fonts: ^4.0.4
   shared_preferences: ^2.2.3
+  webview_flutter: ^4.8.0
   
 
 
@@ -78,6 +79,7 @@ flutter:
   assets:
     - assets/images/primebox_logo.png
     - assets/images/default.png
+    - assets/images/truck_illustration.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

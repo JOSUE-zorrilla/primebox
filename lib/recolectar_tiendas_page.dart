@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'recolectar_recoleccion_page.dart';
 
 class RecolectarTiendasPage extends StatefulWidget {
   const RecolectarTiendasPage({super.key});
@@ -33,42 +34,106 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
   Future<void> _cargarLocales() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Lee la LISTA completa guardada por CentroBootPage
     final jsonStr = prefs.getString('cr_centros_json');
-
     final List<_Centro> lista = [];
+
     if (jsonStr != null && jsonStr.trim().isNotEmpty) {
       try {
         final decoded = jsonDecode(jsonStr);
+
+        // 1) LISTA de objetos
         if (decoded is List) {
           for (final item in decoded) {
             if (item is Map) {
+              final id = (item['IdTienda'] ??
+                      item['idTienda'] ??
+                      item['Id'] ??
+                      item['id'] ??
+                      item['uid'] ??
+                      item['key'] ??
+                      item['idGuiaPB'] ?? // por si viene como guía
+                      '')
+                  .toString();
+
+              // nombre/dirección opcionales
+              final nombre = (item['Nombre'] ?? item['nombre'] ?? id).toString();
+              final direccion =
+                  (item['Direccion'] ?? item['direccion'] ?? '').toString();
+              final icono = (item['Icono'] ?? item['icono'] ?? '').toString();
+
               lista.add(_Centro(
-                nombre: (item['Nombre'] ?? '').toString(),
-                direccion: (item['Direccion'] ?? '').toString(),
-                iconUrl: (item['Icono'] ?? '').toString(),
+                idTienda: id,
+                nombre: nombre.isEmpty ? id : nombre,
+                direccion: direccion,
+                iconUrl: icono,
               ));
             }
           }
         }
+        // 2) MAPA { "<id>": { ... } }  ← TU CASO
+        else if (decoded is Map) {
+          decoded.forEach((key, value) {
+            if (value is Map) {
+              // si no hay id dentro, usar la CLAVE del mapa
+              final id = (value['IdTienda'] ??
+                      value['idTienda'] ??
+                      value['Id'] ??
+                      value['id'] ??
+                      value['idGuiaPB'] ??
+                      key)
+                  .toString();
+
+              // estos datos pueden NO venir; mostramos algo útil
+              final nombre =
+                  (value['Nombre'] ?? value['nombre'] ?? 'ID $key').toString();
+              final direccion =
+                  (value['Direccion'] ?? value['direccion'] ?? '').toString();
+              final icono = (value['Icono'] ?? value['icono'] ?? '').toString();
+
+              lista.add(_Centro(
+                idTienda: id,
+                nombre: nombre.isEmpty ? 'ID $key' : nombre,
+                direccion: direccion,
+                iconUrl: icono,
+              ));
+            } else {
+              // Si el valor no es Map, al menos mostramos la clave como item
+              lista.add(_Centro(
+                idTienda: key.toString(),
+                nombre: 'ID $key',
+                direccion: '',
+                iconUrl: '',
+              ));
+            }
+          });
+        }
       } catch (_) {
-        // fallback a las llaves antiguas
+        // sigue al fallback
       }
     }
 
-    // Fallback: si no hay lista, usa las llaves individuales (1 centro)
+    // Fallback: llaves individuales (1 centro)
     if (lista.isEmpty) {
+      final id = (prefs.getString('cr_id_tienda') ??
+              prefs.getString('cr_id') ??
+              prefs.getString('cr_key') ??
+              '')
+          .trim();
       final nombre = (prefs.getString('cr_nombre') ?? '').trim();
       final direccion = (prefs.getString('cr_direccion') ?? '').trim();
       final icono = (prefs.getString('cr_icono') ?? '').trim();
-      if (nombre.isNotEmpty || direccion.isNotEmpty || icono.isNotEmpty) {
-        lista.add(_Centro(nombre: nombre, direccion: direccion, iconUrl: icono));
+      if (id.isNotEmpty || nombre.isNotEmpty || direccion.isNotEmpty) {
+        lista.add(_Centro(
+          idTienda: id,
+          nombre: nombre.isEmpty ? id : nombre,
+          direccion: direccion,
+          iconUrl: icono,
+        ));
       }
     }
 
-    // Orden estético
+    // Orden y setState
     lista.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
-
     setState(() {
       _centros = lista;
       _filtrados = [...lista];
@@ -100,7 +165,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // ===== Encabezado azul estilo mock =====
+            // Header
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
@@ -114,12 +179,10 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Back + título centrado usando Stack
                   SizedBox(
                     height: 40,
                     child: Stack(
                       children: [
-                        // Botón back en un cuadrito redondeado translúcido
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Material(
@@ -137,7 +200,6 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                             ),
                           ),
                         ),
-                        // Título centrado
                         const Align(
                           alignment: Alignment.center,
                           child: Text(
@@ -152,10 +214,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 14),
-
-                  // Subtítulo en dos líneas
                   const Text(
                     'Ingresar Nombre',
                     style: TextStyle(
@@ -173,10 +232,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                       height: 1.2,
                     ),
                   ),
-
                   const SizedBox(height: 10),
-
-                  // Buscador
                   TextField(
                     controller: _searchCtrl,
                     style: const TextStyle(color: Colors.black87),
@@ -197,7 +253,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
               ),
             ),
 
-            // ===== Lista =====
+            // Lista
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -206,7 +262,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                           child: Padding(
                             padding: EdgeInsets.all(24.0),
                             child: Text(
-                              'No hay centros de recolección guardados.\nInicia sesión nuevamente para sincronizar.',
+                              'No hay registros.\nInicia sesión nuevamente para sincronizar.',
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -218,15 +274,30 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                             final c = _filtrados[i];
                             return _CentroCard(
                               iconUrl: c.iconUrl,
-                              nombre:
-                                  c.nombre.isEmpty ? 'Centro sin nombre' : c.nombre,
+                              nombre: c.nombre.isEmpty ? 'ID ${c.idTienda}' : c.nombre,
                               direccion: c.direccion.isEmpty
-                                  ? 'Dirección no registrada'
+                                  ? '—'
                                   : c.direccion,
                               onTap: () {
-                                // TODO: Navegar al detalle de recolección
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Seleccionado: ${c.nombre}')),
+                                if (c.idTienda.trim().isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Este registro no tiene ID.'),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                // Aquí enviamos EXACTAMENTE la clave (p.ej. L0003175562114040030PB)
+                                // hacia la siguiente pantalla.
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => RecolectarRecoleccionPage(
+                                      idTienda: c.idTienda,
+                                      nombreCentro: c.nombre,
+                                      direccionCentro: c.direccion,
+                                      iconUrl: c.iconUrl,
+                                    ),
+                                  ),
                                 );
                               },
                             );
@@ -267,11 +338,9 @@ class _CentroCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // fila superior
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Icono cuadrado
                   Container(
                     width: 36,
                     height: 36,
@@ -293,30 +362,20 @@ class _CentroCard extends StatelessWidget {
                             color: Color(0xFF1A3365)),
                   ),
                   const SizedBox(width: 10),
-
-                  // Etiqueta + nombre
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Centro de recolección',
-                          style: TextStyle(
-                            color: Color(0xFF6C7A92),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                      ],
+                  const Expanded(
+                    child: Text(
+                      'Centro de recolección',
+                      style: TextStyle(
+                        color: Color(0xFF6C7A92),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-
                   const Icon(Icons.chevron_right_rounded,
                       color: Color(0xFF6C7A92)),
                 ],
               ),
-
               const SizedBox(height: 2),
               Text(
                 nombre,
@@ -328,15 +387,8 @@ class _CentroCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-
               const SizedBox(height: 12),
-
-              const Text(
-                'Dirección',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              const Text('Dirección', style: TextStyle(fontWeight: FontWeight.w700)),
               const SizedBox(height: 4),
               Text(
                 direccion,
@@ -357,8 +409,14 @@ class _CentroCard extends StatelessWidget {
 }
 
 class _Centro {
+  final String idTienda;   // ← aquí guardamos la CLAVE del mapa (p.ej. L0003175562114040030PB)
   final String nombre;
   final String direccion;
   final String iconUrl;
-  _Centro({required this.nombre, required this.direccion, required this.iconUrl});
+  _Centro({
+    required this.idTienda,
+    required this.nombre,
+    required this.direccion,
+    required this.iconUrl,
+  });
 }

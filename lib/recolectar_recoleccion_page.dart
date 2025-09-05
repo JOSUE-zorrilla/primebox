@@ -1,0 +1,594 @@
+// recolectar_recoleccion_page.dart
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import 'firma_webview_page.dart';
+
+class PaqueteLocal {
+  final String idGuiaPB;
+  final String idGuiaProveedor;
+  final String tnReference;
+  final int fechaSolicitudMs;
+
+  PaqueteLocal({
+    required this.idGuiaPB,
+    required this.idGuiaProveedor,
+    required this.tnReference,
+    required this.fechaSolicitudMs,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'idGuiaPB': idGuiaPB,
+        'idGuiaProveedor': idGuiaProveedor,
+        'tnReference': tnReference,
+        'fechaSolicitudMs': fechaSolicitudMs,
+      };
+
+  factory PaqueteLocal.fromMap(Map data) => PaqueteLocal(
+        idGuiaPB: (data['idGuiaPB'] ?? data['IdGuiaPB'] ?? '').toString(),
+        idGuiaProveedor:
+            (data['idGuiaProveedor'] ?? data['IdGuiaProveedor'] ?? '').toString(),
+        tnReference: (data['tnReference'] ?? data['tn_reference'] ?? '').toString(),
+        fechaSolicitudMs: int.tryParse(
+                (data['FechaSolicitud'] ?? data['fechaSolicitudMs'] ?? '0')
+                    .toString()) ??
+            0,
+      );
+}
+
+class RecolectarRecoleccionPage extends StatefulWidget {
+  final String idTienda;
+  final String nombreCentro;
+  final String direccionCentro;
+  final String iconUrl;
+
+  const RecolectarRecoleccionPage({
+    super.key,
+    required this.idTienda,
+    required this.nombreCentro,
+    required this.direccionCentro,
+    required this.iconUrl,
+  });
+
+  @override
+  State<RecolectarRecoleccionPage> createState() =>
+      _RecolectarRecoleccionPageState();
+}
+
+class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
+  bool _loadingData = true;
+
+  // Índice de guías válidas para este centro
+  final Map<String, PaqueteLocal> _indexPorCodigo = {}; // código normalizado → paquete
+  List<PaqueteLocal> _seleccionados = [];
+
+  final TextEditingController _buscarCtrl = TextEditingController();
+
+  // ====== Scanner embebido ======
+  final GlobalKey _qrKey = GlobalKey(debugLabel: 'QR');
+  QRViewController? _qrController;
+  bool _permissionGranted = false;
+  final Set<String> _codesProcesados = {}; // evita duplicados por “rebote”
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFirebaseToLocal();
+    _checkCameraPermission(); // pedimos permiso de cámara
+  }
+
+  @override
+  void dispose() {
+    _buscarCtrl.dispose();
+    _qrController?.dispose();
+    super.dispose();
+  }
+
+  // Hot reload: pausar/reanudar cámara
+  @override
+  void reassemble() {
+    super.reassemble();
+    _qrController?.pauseCamera();
+    _qrController?.resumeCamera();
+  }
+
+  String get _prefsKey => 'pb_guias_${widget.idTienda}';
+
+  String _norm(String s) =>
+      s.trim().toUpperCase().replaceAll(' ', '').replaceAll('#', '');
+
+  Future<void> _checkCameraPermission() async {
+    var status = await Permission.camera.status;
+    if (!status.isGranted) {
+      status = await Permission.camera.request();
+    }
+    if (mounted) {
+      setState(() => _permissionGranted = status.isGranted);
+    }
+  }
+
+  Future<void> _syncFirebaseToLocal() async {
+    setState(() => _loadingData = true);
+
+    final ref = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/idGuiasSolicitadas/${widget.idTienda}/PaquetesSolicitados');
+
+    try {
+      final snap = await ref.get();
+      final List<PaqueteLocal> lista = [];
+
+      if (snap.value is Map) {
+        final map = snap.value as Map;
+        for (final entry in map.entries) {
+          final val = entry.value;
+          if (val is Map) {
+            final pk = PaqueteLocal.fromMap(val);
+            if (pk.idGuiaPB.isNotEmpty ||
+                pk.idGuiaProveedor.isNotEmpty ||
+                pk.tnReference.isNotEmpty) {
+              lista.add(pk);
+            }
+          }
+        }
+      } else if (snap.value is List) {
+        for (final v in (snap.value as List)) {
+          if (v is Map) {
+            final pk = PaqueteLocal.fromMap(v);
+            if (pk.idGuiaPB.isNotEmpty ||
+                pk.idGuiaProveedor.isNotEmpty ||
+                pk.tnReference.isNotEmpty) {
+              lista.add(pk);
+            }
+          }
+        }
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+          _prefsKey, jsonEncode(lista.map((e) => e.toJson()).toList()));
+      await prefs.setInt('${_prefsKey}_lastSync',
+          DateTime.now().millisecondsSinceEpoch);
+
+      _indexPorCodigo.clear();
+      for (final p in lista) {
+        if (p.idGuiaPB.isNotEmpty) _indexPorCodigo[_norm(p.idGuiaPB)] = p;
+        if (p.idGuiaProveedor.isNotEmpty) {
+          _indexPorCodigo[_norm(p.idGuiaProveedor)] = p;
+        }
+        if (p.tnReference.isNotEmpty) {
+          _indexPorCodigo[_norm(p.tnReference)] = p;
+        }
+      }
+    } catch (_) {
+      // Si falla red, intenta cargar de local
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw != null) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          for (final m in decoded) {
+            final p = PaqueteLocal.fromMap(m as Map);
+            if (p.idGuiaPB.isNotEmpty) _indexPorCodigo[_norm(p.idGuiaPB)] = p;
+            if (p.idGuiaProveedor.isNotEmpty) {
+              _indexPorCodigo[_norm(p.idGuiaProveedor)] = p;
+            }
+            if (p.tnReference.isNotEmpty) {
+              _indexPorCodigo[_norm(p.tnReference)] = p;
+            }
+          }
+        }
+      }
+    }
+
+    if (mounted) setState(() => _loadingData = false);
+  }
+
+  void _handleAddCode(String rawCode) {
+    final code = _norm(rawCode);
+    if (code.isEmpty) return;
+
+    // evita repetir por “rebotes” de cámara
+    if (_codesProcesados.contains(code)) return;
+    _codesProcesados.add(code);
+
+    final p = _indexPorCodigo[code];
+    if (p == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Este paquete no está asignado a este centro de recolección.'),
+        ),
+      );
+      return;
+    }
+
+    final yaExiste = _seleccionados.any((e) => e.idGuiaPB == p.idGuiaPB);
+    if (yaExiste) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Este paquete ya fue añadido.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _seleccionados = [..._seleccionados, p];
+    });
+  }
+
+  void _agregarPorInput() {
+    final txt = _buscarCtrl.text;
+    if (txt.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingresa un código en el buscador.')),
+      );
+      return;
+    }
+    _handleAddCode(txt);
+    _buscarCtrl.clear();
+  }
+
+  void _eliminarDeLista(PaqueteLocal p) {
+    setState(() {
+      _seleccionados.removeWhere((e) => e.idGuiaPB == p.idGuiaPB);
+    });
+  }
+
+Future<void> _irAFirma() async {
+  if (_seleccionados.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Debes escanear al menos 1 paquete.')),
+    );
+    return;
+  }
+
+  final now = DateTime.now();
+  final fechaYMD = DateFormat('yyyy-MM-dd').format(now); // para URL de firma
+  // Clave de carpeta con formato YYYY-MM-DDD (día del año en 3 dígitos)
+  final fechaKeyCarpeta =
+      '${DateFormat('yyyy-MM-').format(now)}${DateFormat('DDD').format(now)}';
+  final idEmbarque = now.millisecondsSinceEpoch;
+
+  final url =
+      'https://primebox.mx/dashboard/app/Views/view_firma_embarque?idEmbarque=$idEmbarque&idFecha=$fechaYMD';
+
+  final urlFirma = await Navigator.of(context).push<String?>(
+    MaterialPageRoute(
+      builder: (_) => FirmaWebViewPage(
+        url: url,
+        idEmbarque: idEmbarque,
+        fechaKeyYYYYMMDDD: fechaKeyCarpeta,
+      ),
+    ),
+  );
+
+  // cuando regreses de la firma, aquí ya puedes continuar tu flujo
+  if (urlFirma != null && urlFirma.isNotEmpty) {
+    await _ejecutarProcesoFinal(urlFirma: urlFirma, fromFirma: true);
+
+  }
+}
+Future<void> _ejecutarProcesoFinal({
+  required String urlFirma,
+  required bool fromFirma,
+}) async {
+  // Por ahora solo para que compile y veas el flujo OK.
+  // Aquí luego pones el envío al webhook + GPS.
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        fromFirma
+            ? 'Firma recibida. urlFirma=$urlFirma'
+            : 'Recolección finalizada sin firma.',
+      ),
+    ),
+  );
+}
+
+
+
+  // ======== UI ========
+  @override
+  Widget build(BuildContext context) {
+    if (_loadingData) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.icecream_outlined, size: 64),
+                SizedBox(height: 16),
+                Text(
+                  'Obteniendo paquetes solicitados\na recolección...',
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 16),
+                CircularProgressIndicator(),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    const headerColor = Color(0xFF1955CC);
+    final count = _seleccionados.length;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF2F3F7),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ===== Encabezado con QR embebido =====
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+              decoration: const BoxDecoration(
+                color: headerColor,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    height: 40,
+                    child: Stack(
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Material(
+                            color: Colors.white.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(10),
+                            child: InkWell(
+                              onTap: () => Navigator.pop(context),
+                              borderRadius: BorderRadius.circular(10),
+                              child: const SizedBox(
+                                width: 36,
+                                height: 36,
+                                child: Icon(Icons.arrow_back_ios_new_rounded,
+                                    size: 18, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const Align(
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Recolección de paquetes',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$count',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // ====== Escáner embebido en lugar de imagen ======
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      height: 160,
+                      width: double.infinity,
+                      child: _permissionGranted
+                          ? QRView(
+                              key: _qrKey,
+                              onQRViewCreated: _onQRViewCreated,
+                              overlay: QrScannerOverlayShape(
+                                borderColor: Colors.white,
+                                borderRadius: 8,
+                                borderLength: 20,
+                                borderWidth: 6,
+                                cutOutHeight: 140,
+                                cutOutWidth: 280,
+                              ),
+                            )
+                          : _buildPermissionPlaceholder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Dirección del centro
+                  Text(
+                    widget.nombreCentro,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.direccionCentro,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Buscador + botón 3 puntos (agrega por texto)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _buscarCtrl,
+                          textInputAction: TextInputAction.search,
+                          onSubmitted: (_) => _agregarPorInput(),
+                          decoration: InputDecoration(
+                            hintText: 'Buscar o escanear',
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 0),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            prefixIcon: const Icon(Icons.search),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Material(
+                        color: Colors.white.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(10),
+                        child: InkWell(
+                          onTap: _agregarPorInput,
+                          borderRadius: BorderRadius.circular(10),
+                          child: const SizedBox(
+                            width: 36,
+                            height: 36,
+                            child: Icon(Icons.more_horiz, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                      // Nota: Se eliminó el botón de abrir escáner.
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // ===== Lista de seleccionados =====
+            Expanded(
+              child: _seleccionados.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24.0),
+                        child: Text(
+                          'Escanea o busca un código para añadirlo a la lista.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+                      itemCount: _seleccionados.length,
+                      itemBuilder: (_, i) {
+                        final p = _seleccionados[i];
+                        final titulo = p.idGuiaPB.isNotEmpty
+                            ? p.idGuiaPB
+                            : (p.idGuiaProveedor.isNotEmpty
+                                ? p.idGuiaProveedor
+                                : p.tnReference);
+                        return Card(
+                          elevation: 1.5,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          child: ListTile(
+                            leading: const CircleAvatar(
+                              backgroundColor: Color(0xFFEFF3FF),
+                              child: Icon(Icons.inventory_2_outlined,
+                                  color: Color(0xFF1955CC)),
+                            ),
+                            title: Text('Orden\n#$titulo',
+                                style: const TextStyle(height: 1.2)),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red),
+                              onPressed: () => _eliminarDeLista(p),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+
+      // ===== Botón inferior Firma Digital =====
+      bottomSheet: SafeArea(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          color: const Color(0xFF2B59F2),
+          child: ElevatedButton(
+            onPressed: _seleccionados.isEmpty ? null : _irAFirma,
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor:
+                  _seleccionados.isEmpty ? Colors.black26 : const Color(0xFF2B59F2),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Firma Digital',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ====== helpers UI ======
+  Widget _buildPermissionPlaceholder() {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.photo_camera_front, color: Colors.white70, size: 40),
+            const SizedBox(height: 8),
+            const Text(
+              'Se requiere permiso de cámara',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _checkCameraPermission,
+              child: const Text('Conceder permiso'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _onQRViewCreated(QRViewController controller) {
+    _qrController = controller;
+    _qrController!.scannedDataStream.listen((scanData) async {
+      final raw = scanData.code ?? '';
+      if (raw.isEmpty) return;
+      _handleAddCode(raw);
+    });
+  }
+}

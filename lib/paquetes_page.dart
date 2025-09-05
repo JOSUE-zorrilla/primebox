@@ -59,14 +59,14 @@ class _PaquetesPageState extends State<PaquetesPage> {
   }
 
   void _irARecolectarTiendas() {
-  // Debe estar conectado
-  if (!_requerirConexion()) return;
+    // Debe estar DESconectado
+    if (!_requerirDesconexion()) return;
 
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const RecolectarTiendasPage()),
-  );
-}
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const RecolectarTiendasPage()),
+    );
+  }
 
   // =============== Utilidades de tiempo ===============
   String _fmt(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
@@ -268,7 +268,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
     }
   }
 
-  // =============== Requerir conexión ===============
+  // =============== Requerir conexión / desconexión ===============
   bool get _estaConectado => _estadoConexion == 'Conectado';
 
   bool _requerirConexion() {
@@ -279,6 +279,26 @@ class _PaquetesPageState extends State<PaquetesPage> {
       builder: (context) => AlertDialog(
         title: const Text('No estás conectado'),
         content: const Text('Debes conectarte para gestionar paquetes.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
+  // NUEVO: Debe estar DESconectado para continuar
+  bool _requerirDesconexion() {
+    if (!_estaConectado) return true; // si NO está conectado, puede avanzar
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Estás conectado'),
+        content: const Text('Debes desconectarte para recolectar en tienda.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -511,7 +531,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                   item(
                     icon: Icons.store_mall_directory_outlined,
                     text: 'Recolectar en tienda',
-                    onTap: _irARecolectarTiendas,   // << antes ponías "próximamente"
+                    onTap: _irARecolectarTiendas,   // ahora exige estar DESconectado
                   ),
                   item(
                     icon: Icons.route_outlined,

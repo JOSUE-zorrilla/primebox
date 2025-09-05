@@ -61,30 +61,49 @@ class _CentroBootPageState extends State<CentroBootPage> {
         }
 
         /// Normalizamos a una **lista de centros** con las llaves:
-        /// Nombre, Direccion, Icono
+        /// IdTienda, Nombre, Direccion, Icono
         final List<Map<String, String>> centros = [];
 
         if (snap.exists && snap.value != null) {
           final val = snap.value;
 
-          // Estructura típica: Map { centroId: {Nombre, Direccion, Icono}, ... }
+          // Caso A: viene como MAPA { <centroId>: {Nombre, Direccion, Icono}, ... }
           if (val is Map) {
-            for (final entry in val.entries) {
-              final data = entry.value;
-              if (data is Map) {
+            val.forEach((key, raw) {
+              if (raw is Map) {
+                final id = (raw['IdTienda'] ??
+                        raw['idTienda'] ??
+                        raw['Id'] ??
+                        raw['id'] ??
+                        raw['uid'] ??
+                        raw['key'] ??
+                        key) // fallback a la clave del mapa
+                    .toString();
+
                 centros.add({
-                  'Nombre': (data['Nombre'] ?? '').toString(),
-                  'Direccion': (data['Direccion'] ?? '').toString(),
-                  'Icono': (data['Icono'] ?? '').toString(),
+                  'IdTienda': id,
+                  'Nombre': (raw['Nombre'] ?? '').toString(),
+                  'Direccion': (raw['Direccion'] ?? '').toString(),
+                  'Icono': (raw['Icono'] ?? '').toString(),
                 });
               }
-            }
+            });
           }
-          // A veces podría venir como List
+          // Caso B: viene como LISTA
           else if (val is List) {
             for (final item in val) {
               if (item is Map) {
+                final id = (item['IdTienda'] ??
+                        item['idTienda'] ??
+                        item['Id'] ??
+                        item['id'] ??
+                        item['uid'] ??
+                        item['key'] ??
+                        '')
+                    .toString();
+
                 centros.add({
+                  'IdTienda': id,
                   'Nombre': (item['Nombre'] ?? '').toString(),
                   'Direccion': (item['Direccion'] ?? '').toString(),
                   'Icono': (item['Icono'] ?? '').toString(),
@@ -98,29 +117,35 @@ class _CentroBootPageState extends State<CentroBootPage> {
           debugPrint('[CentroBoot] ⚠️ No hay centros en la ruta.');
         }
 
-        _cargados = centros.length;
+        // Limpia items sin IdTienda por seguridad
+        final depurados =
+            centros.where((c) => (c['IdTienda'] ?? '').toString().trim().isNotEmpty).toList();
+
+        _cargados = depurados.length;
         setState(() => _status = 'Sincronizando $_cargados centro(s)...');
 
         final prefs = await SharedPreferences.getInstance();
 
         // Guarda lista completa (JSON)
-        await prefs.setString('cr_centros_json', jsonEncode(centros));
+        await prefs.setString('cr_centros_json', jsonEncode(depurados));
         await prefs.setString('cr_lastSync', DateTime.now().toIso8601String());
 
-        // Compatibilidad: guarda el primero en las llaves antiguas
-        if (centros.isNotEmpty) {
-          await prefs.setString('cr_nombre', centros.first['Nombre'] ?? '');
-          await prefs.setString('cr_direccion', centros.first['Direccion'] ?? '');
-          await prefs.setString('cr_icono', centros.first['Icono'] ?? '');
+        // Compatibilidad: guarda el primero en llaves individuales (incluye cr_id_tienda)
+        if (depurados.isNotEmpty) {
+          await prefs.setString('cr_id_tienda', depurados.first['IdTienda'] ?? '');
+          await prefs.setString('cr_nombre', depurados.first['Nombre'] ?? '');
+          await prefs.setString('cr_direccion', depurados.first['Direccion'] ?? '');
+          await prefs.setString('cr_icono', depurados.first['Icono'] ?? '');
         } else {
+          await prefs.setString('cr_id_tienda', '');
           await prefs.setString('cr_nombre', '');
           await prefs.setString('cr_direccion', '');
           await prefs.setString('cr_icono', '');
         }
 
-        debugPrint('[CentroBoot] ✅ Prefs guardadas. total=${centros.length}');
+        debugPrint('[CentroBoot] ✅ Prefs guardadas. total=${depurados.length}');
         if (kDebugMode) {
-          dev.log('centros_json=${jsonEncode(centros)}', name: 'CentroBoot/prefs');
+          dev.log('centros_json=${jsonEncode(depurados)}', name: 'CentroBoot/prefs');
         }
       }
     } catch (e, st) {
@@ -128,8 +153,7 @@ class _CentroBootPageState extends State<CentroBootPage> {
       if (kDebugMode) dev.log('StackTrace: $st', name: 'CentroBoot/error');
     } finally {
       setState(() => _status = 'Finalizando...');
-      // Mantener splash al menos 3s para UX
-      await Future.delayed(const Duration(seconds: 3));
+      await Future.delayed(const Duration(seconds: 3)); // UX
       if (!mounted) return;
       _goNext();
     }
@@ -146,7 +170,7 @@ class _CentroBootPageState extends State<CentroBootPage> {
       body: SafeArea(
         child: Stack(
           children: [
-            // 🔎 Banda superior con idCiudad y cantidad (solo en debug)
+            // 🔎 Banda superior debug
             if (kDebugMode && (_debugIdCiudad?.isNotEmpty ?? false))
               Positioned(
                 top: 8,
@@ -172,18 +196,12 @@ class _CentroBootPageState extends State<CentroBootPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Image.asset(
-                    'assets/images/primebox_logo.png',
-                    height: 100,
-                    fit: BoxFit.contain,
-                  ),
+                  Image.asset('assets/images/primebox_logo.png',
+                      height: 100, fit: BoxFit.contain),
                   const SizedBox(height: 8),
                   const Text(
                     'Experiencia e Innovación',
-                    style: TextStyle(
-                      color: Color(0xFFB91C1C),
-                      fontSize: 16,
-                    ),
+                    style: TextStyle(color: Color(0xFFB91C1C), fontSize: 16),
                   ),
                 ],
               ),
@@ -192,14 +210,21 @@ class _CentroBootPageState extends State<CentroBootPage> {
             // Ilustración
             Align(
               alignment: const Alignment(0, 0.3),
-              child: Image.asset(
-                'assets/images/truck_illustration.png',
-                height: 140,
-                fit: BoxFit.contain,
-              ),
+              child: Image.asset('assets/images/truck_illustration.png',
+                  height: 140, fit: BoxFit.contain),
             ),
 
             // Estado
+            Align(
+              alignment: const Alignment(0, 0.85),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  SizedBox(height: 12),
+                  // El texto de estado viene de _status
+                ],
+              ),
+            ),
             Align(
               alignment: const Alignment(0, 0.85),
               child: Column(

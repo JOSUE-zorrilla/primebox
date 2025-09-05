@@ -62,6 +62,8 @@ class GuiaEncontradaPage extends StatelessWidget {
     return estado == 'Conectado';
   }
 
+  
+
   Future<bool> _requerirConexion(BuildContext context) async {
     final ok = await _estaConectado();
     if (ok) return true;
@@ -93,6 +95,8 @@ class GuiaEncontradaPage extends StatelessWidget {
       ),
     );
   }
+
+  
 
   // ===== WhatsApp =====
   void _abrirWhatsapp(BuildContext context, {String? texto}) async {

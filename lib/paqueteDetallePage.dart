@@ -109,10 +109,26 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
-  void _llamar() async {
-    final uri = Uri(scheme: 'tel', path: widget.telefono);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+ void _llamar() async {
+  final number = widget.telefono.trim();
+  if (number.isEmpty) {
+    _snack('No hay número de teléfono');
+    return;
   }
+
+  // Limpia el número: deja dígitos y el +
+  final sanitized = number.replaceAll(RegExp(r'[^0-9+]'), '');
+
+  final uri = Uri(scheme: 'tel', path: sanitized);
+  final ok = await canLaunchUrl(uri);
+  if (ok) {
+    // Abre la app de teléfono/dialer con el número listo
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } else {
+    _snack('No se pudo abrir la app de llamadas.');
+  }
+}
+
 
   void _enviarWhatsApp() async {
     final mensaje = 'Hola, te saludamos de Primebox Driver';
