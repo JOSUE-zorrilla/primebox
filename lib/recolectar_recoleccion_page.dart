@@ -1,13 +1,13 @@
 // recolectar_recoleccion_page.dart
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:intl/intl.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
-
-import 'firma_webview_page.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
 class PaqueteLocal {
   final String idGuiaPB;
@@ -32,11 +32,14 @@ class PaqueteLocal {
   factory PaqueteLocal.fromMap(Map data) => PaqueteLocal(
         idGuiaPB: (data['idGuiaPB'] ?? data['IdGuiaPB'] ?? '').toString(),
         idGuiaProveedor:
-            (data['idGuiaProveedor'] ?? data['IdGuiaProveedor'] ?? '').toString(),
-        tnReference: (data['tnReference'] ?? data['tn_reference'] ?? '').toString(),
+            (data['idGuiaProveedor'] ?? data['IdGuiaProveedor'] ?? '')
+                .toString(),
+        tnReference:
+            (data['tnReference'] ?? data['tn_reference'] ?? '').toString(),
         fechaSolicitudMs: int.tryParse(
-                (data['FechaSolicitud'] ?? data['fechaSolicitudMs'] ?? '0')
-                    .toString()) ??
+              (data['FechaSolicitud'] ?? data['fechaSolicitudMs'] ?? '0')
+                  .toString(),
+            ) ??
             0,
       );
 }
@@ -61,6 +64,7 @@ class RecolectarRecoleccionPage extends StatefulWidget {
 }
 
 class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
+  // ===== Estados de datos y UI =====
   bool _loadingData = true;
 
   // Índice de guías válidas para este centro
@@ -75,11 +79,21 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   bool _permissionGranted = false;
   final Set<String> _codesProcesados = {}; // evita duplicados por “rebote”
 
+  // ====== Ubicación precargada ======
+  bool _locLoading = true;
+  String? _locError;
+  double? _lat;
+  double? _lng;
+
+  static const String _urlWebhook =
+      'https://editor.apphive.io/hook/ccp_1Cw2TxVBj45xu2nA1EdBgq';
+
   @override
   void initState() {
     super.initState();
     _syncFirebaseToLocal();
-    _checkCameraPermission(); // pedimos permiso de cámara
+    _checkCameraPermission(); // permiso de cámara para QR
+    _initLocation(); // obtener lat/lng al cargar la pantalla
   }
 
   @override
@@ -102,6 +116,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   String _norm(String s) =>
       s.trim().toUpperCase().replaceAll(' ', '').replaceAll('#', '');
 
+  // ====== Permisos ======
   Future<void> _checkCameraPermission() async {
     var status = await Permission.camera.status;
     if (!status.isGranted) {
@@ -112,6 +127,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     }
   }
 
+  // ====== Cargar lista de paquetes de Firebase a local ======
   Future<void> _syncFirebaseToLocal() async {
     setState(() => _loadingData = true);
 
@@ -188,20 +204,95 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     if (mounted) setState(() => _loadingData = false);
   }
 
+  // ====== Ubicación al cargar ======
+  Future<void> _initLocation() async {
+    setState(() {
+      _locLoading = true;
+      _locError = null;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _locError = 'Servicio de ubicación desactivado.';
+          _locLoading = false;
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _locError = 'Permiso de ubicación denegado.';
+            _locLoading = false;
+          });
+          return;
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _locError =
+              'Permiso de ubicación denegado permanentemente. Habilita desde Ajustes.';
+          _locLoading = false;
+        });
+        return;
+      }
+
+      // Intento principal con timeout
+      Position pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 12),
+        );
+      } on TimeoutException {
+        // Fallback a última conocida
+        final last = await Geolocator.getLastKnownPosition();
+        if (last == null) {
+          setState(() {
+            _locError =
+                'No fue posible obtener la ubicación. Intenta actualizar.';
+            _locLoading = false;
+          });
+          return;
+        }
+        pos = last;
+      }
+
+      setState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+        _locLoading = false;
+        _locError = null;
+      });
+
+      // Logs de depuración (opcional)
+      // debugPrint('GPS => lat=$_lat, lng=$_lng');
+    } catch (e) {
+      setState(() {
+        _locError = e.toString();
+        _locLoading = false;
+      });
+    }
+  }
+
+  // ====== Manejo de códigos ======
   void _handleAddCode(String rawCode) {
     final code = _norm(rawCode);
     if (code.isEmpty) return;
 
-    // evita repetir por “rebotes” de cámara
-    if (_codesProcesados.contains(code)) return;
+    if (_codesProcesados.contains(code)) return; // evita rebote
     _codesProcesados.add(code);
 
     final p = _indexPorCodigo[code];
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-              'Este paquete no está asignado a este centro de recolección.'),
+          content:
+              Text('Este paquete no está asignado a este centro de recolección.'),
         ),
       );
       return;
@@ -238,59 +329,102 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     });
   }
 
-Future<void> _irAFirma() async {
-  if (_seleccionados.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Debes escanear al menos 1 paquete.')),
+  // ====== FINALIZAR: Usa la lat/lng precargada ======
+  Future<void> _finalizarRecoleccion() async {
+    if (_seleccionados.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Debes escanear al menos 1 paquete.')),
+      );
+      return;
+    }
+    if (_lat == null || _lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Ubicación aún no disponible. Pulsa el botón de actualizar GPS.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar Recolección'),
+        content: Text(
+            '¿Deseas confirmar la recolección de ${_seleccionados.length} paquete(s)?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
     );
-    return;
+
+    if (confirmar != true) return;
+
+    try {
+      final fechaMs = DateTime.now().millisecondsSinceEpoch;
+
+      // Objeto de ids escaneados (clave = id preferente)
+      final Map<String, dynamic> dataRecolectados = {};
+      for (final p in _seleccionados) {
+        final key = (p.idGuiaPB.isNotEmpty
+                ? p.idGuiaPB
+                : (p.tnReference.isNotEmpty ? p.tnReference : p.idGuiaProveedor))
+            .toString();
+        dataRecolectados[key] = {
+          'idGuiaPB': p.idGuiaPB,
+          'idGuiaProveedor': p.idGuiaProveedor,
+          'tnReference': p.tnReference,
+        };
+      }
+
+      final payload = {
+        'FechaTimestamp': fechaMs,
+        'Latitude': _lat,
+        'Longitude': _lng,
+        'NombreCentrl': widget.nombreCentro,
+        'dataRecolectados': dataRecolectados,
+        'idCentroRecoleccion': widget.idTienda,
+      };
+
+      final resp = await http.post(
+        Uri.parse(_urlWebhook),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (!mounted) return;
+
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Información enviada')),
+        );
+        setState(() {
+          _seleccionados = [];
+          _codesProcesados.clear();
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Error al enviar (${resp.statusCode}). ${resp.body.isNotEmpty ? resp.body : ''}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    }
   }
-
-  final now = DateTime.now();
-  final fechaYMD = DateFormat('yyyy-MM-dd').format(now); // para URL de firma
-  // Clave de carpeta con formato YYYY-MM-DDD (día del año en 3 dígitos)
-  final fechaKeyCarpeta =
-      '${DateFormat('yyyy-MM-').format(now)}${DateFormat('DDD').format(now)}';
-  final idEmbarque = now.millisecondsSinceEpoch;
-
-  final url =
-      'https://primebox.mx/dashboard/app/Views/view_firma_embarque?idEmbarque=$idEmbarque&idFecha=$fechaYMD';
-
-  final urlFirma = await Navigator.of(context).push<String?>(
-    MaterialPageRoute(
-      builder: (_) => FirmaWebViewPage(
-        url: url,
-        idEmbarque: idEmbarque,
-        fechaKeyYYYYMMDDD: fechaKeyCarpeta,
-      ),
-    ),
-  );
-
-  // cuando regreses de la firma, aquí ya puedes continuar tu flujo
-  if (urlFirma != null && urlFirma.isNotEmpty) {
-    await _ejecutarProcesoFinal(urlFirma: urlFirma, fromFirma: true);
-
-  }
-}
-Future<void> _ejecutarProcesoFinal({
-  required String urlFirma,
-  required bool fromFirma,
-}) async {
-  // Por ahora solo para que compile y veas el flujo OK.
-  // Aquí luego pones el envío al webhook + GPS.
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(
-        fromFirma
-            ? 'Firma recibida. urlFirma=$urlFirma'
-            : 'Recolección finalizada sin firma.',
-      ),
-    ),
-  );
-}
-
-
 
   // ======== UI ========
   @override
@@ -397,7 +531,7 @@ Future<void> _ejecutarProcesoFinal({
                   ),
                   const SizedBox(height: 12),
 
-                  // ====== Escáner embebido en lugar de imagen ======
+                  // ====== Escáner embebido ======
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: SizedBox(
@@ -419,7 +553,6 @@ Future<void> _ejecutarProcesoFinal({
                           : _buildPermissionPlaceholder(),
                     ),
                   ),
-
                   const SizedBox(height: 14),
 
                   // Dirección del centro
@@ -436,6 +569,41 @@ Future<void> _ejecutarProcesoFinal({
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ====== GPS mostrado como texto (precargado) ======
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.my_location_outlined,
+                            color: Colors.white70, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _locLoading
+                                ? 'GPS: obteniendo...'
+                                : (_lat != null && _lng != null)
+                                    ? 'GPS: ${_lat!.toStringAsFixed(6)}, ${_lng!.toStringAsFixed(6)}'
+                                    : 'GPS: ${_locError ?? 'no disponible'}',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Actualizar GPS',
+                          onPressed: _initLocation,
+                          icon: const Icon(Icons.refresh,
+                              color: Colors.white70, size: 18),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 10),
 
@@ -475,7 +643,6 @@ Future<void> _ejecutarProcesoFinal({
                           ),
                         ),
                       ),
-                      // Nota: Se eliminó el botón de abrir escáner.
                     ],
                   ),
                 ],
@@ -530,18 +697,19 @@ Future<void> _ejecutarProcesoFinal({
         ),
       ),
 
-      // ===== Botón inferior Firma Digital =====
+      // ===== Botón inferior Finalizar =====
       bottomSheet: SafeArea(
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           color: const Color(0xFF2B59F2),
           child: ElevatedButton(
-            onPressed: _seleccionados.isEmpty ? null : _irAFirma,
+            onPressed: _seleccionados.isEmpty ? null : _finalizarRecoleccion,
             style: ElevatedButton.styleFrom(
               foregroundColor: Colors.white,
-              backgroundColor:
-                  _seleccionados.isEmpty ? Colors.black26 : const Color(0xFF2B59F2),
+              backgroundColor: _seleccionados.isEmpty
+                  ? Colors.black26
+                  : const Color(0xFF2B59F2),
               elevation: 0,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
@@ -549,7 +717,7 @@ Future<void> _ejecutarProcesoFinal({
               ),
             ),
             child: const Text(
-              'Firma Digital',
+              'Finalizar',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
           ),
