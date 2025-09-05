@@ -6,11 +6,30 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" /> <!-- Android 13+ -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- Android 13+ -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <!-- Uso de hardware -->
-    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" />
+
+    <!-- 👇 Necesario en Android 11+ para que canLaunch/launch con tel: funcione -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+
+        <!-- Dejas también tu intent existente -->
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
 
     <application
         android:name="${applicationName}"
@@ -18,7 +37,9 @@
         android:icon="@mipmap/ic_launcher">
 
         <!-- Flutter embebido -->
-        <meta-data android:name="flutterEmbedding" android:value="2" />
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
 
         <!-- Canal por defecto para notificaciones Firebase -->
         <meta-data
@@ -57,12 +78,4 @@
                 android:resource="@xml/file_paths" />
         </provider>
     </application>
-
-    <!-- Compatibilidad para apps que manipulan texto -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT" />
-            <data android:mimeType="text/plain" />
-        </intent>
-    </queries>
 </manifest>
