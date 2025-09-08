@@ -8,6 +8,11 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'recolectados_centros_page.dart';
+
+
+// Importa las variables globales definidas en login_page.dart
+import 'login_page.dart' show globalNombre, globalUserId, globalIdCiudad;
 
 class PaqueteLocal {
   final String idGuiaPB;
@@ -86,7 +91,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   double? _lng;
 
   static const String _urlWebhook =
-      'https://editor.apphive.io/hook/ccp_1Cw2TxVBj45xu2nA1EdBgq';
+      'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_1Cw2TxVBj45xu2nA1EdBgq';
 
   @override
   void initState() {
@@ -279,6 +284,28 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     }
   }
 
+  // ====== Helpers de fecha requeridos por el webhook ======
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  /// Convierte un timestamp en milisegundos a "YYYY-MM-DD"
+  String _fmtYYYYMMDD(int ms, {bool useUtc = false}) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
+    final y = dt.year.toString();
+    final m = _two(dt.month);
+    final d = _two(dt.day);
+    return '$y-$m-$d';
+  }
+
+  /// Convierte un timestamp en milisegundos a "YYYY-MM-DD HH:MM:SS"
+  String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
+    final base = _fmtYYYYMMDD(ms, useUtc: useUtc);
+    final hh = _two(dt.hour);
+    final mm = _two(dt.minute);
+    final ss = _two(dt.second);
+    return '$base $hh:$mm:$ss';
+  }
+
   // ====== Manejo de códigos ======
   void _handleAddCode(String rawCode) {
     final code = _norm(rawCode);
@@ -371,6 +398,13 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     try {
       final fechaMs = DateTime.now().millisecondsSinceEpoch;
 
+      // NUEVO: formateos requeridos por el webhook
+      final yyyyMMdd = _fmtYYYYMMDD(fechaMs);              // "YYYY-MM-DD"
+      final yyyyMMddHHmmss = _fmtYYYYMMDDHHMMSS(fechaMs);  // "YYYY-MM-DD HH:MM:SS"
+      // Si lo quieres en UTC, usa:
+      // final yyyyMMdd = _fmtYYYYMMDD(fechaMs, useUtc: true);
+      // final yyyyMMddHHmmss = _fmtYYYYMMDDHHMMSS(fechaMs, useUtc: true);
+
       // Objeto de ids escaneados (clave = id preferente)
       final Map<String, dynamic> dataRecolectados = {};
       for (final p in _seleccionados) {
@@ -379,7 +413,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
                 : (p.tnReference.isNotEmpty ? p.tnReference : p.idGuiaProveedor))
             .toString();
         dataRecolectados[key] = {
-          'idGuiaPB': p.idGuiaPB,
+          'idGuia': p.idGuiaPB,
           'idGuiaProveedor': p.idGuiaProveedor,
           'tnReference': p.tnReference,
         };
@@ -387,11 +421,18 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
 
       final payload = {
         'FechaTimestamp': fechaMs,
+        'YYYYMMDD': yyyyMMdd,                 // agregado
+        'YYYYMMDDHHMMSS': yyyyMMddHHmmss,     // agregado
         'Latitude': _lat,
         'Longitude': _lng,
-        'NombreCentrl': widget.nombreCentro,
+        'NombreCentro': widget.nombreCentro, // se mantiene tal cual estaba
         'dataRecolectados': dataRecolectados,
         'idCentroRecoleccion': widget.idTienda,
+
+        // ===== Campos adicionales solicitados =====
+        'NombreDriver': globalNombre ?? '',
+        'idDriver': globalUserId ?? '',
+        'idCiudad': globalIdCiudad ?? '',
       };
 
       final resp = await http.post(
@@ -402,22 +443,37 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
 
       if (!mounted) return;
 
-      if (resp.statusCode >= 200 && resp.statusCode < 300) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Información enviada')),
-        );
-        setState(() {
-          _seleccionados = [];
-          _codesProcesados.clear();
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Error al enviar (${resp.statusCode}). ${resp.body.isNotEmpty ? resp.body : ''}'),
-          ),
-        );
-      }
+     if (resp.statusCode >= 200 && resp.statusCode < 300) {
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Información enviada')),
+  );
+
+  // Limpia selección local
+  setState(() {
+    _seleccionados = [];
+    _codesProcesados.clear();
+  });
+
+  // >>> NUEVO: continuar a la siguiente pantalla (lista por centro)
+  await Future.delayed(const Duration(milliseconds: 400));
+  if (!mounted) return;
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => const RecolectadosCentrosPage(),
+    ),
+  );
+} else {
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        'Error al enviar (${resp.statusCode}). ${resp.body.isNotEmpty ? resp.body : ''}',
+      ),
+    ),
+  );
+}
+
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

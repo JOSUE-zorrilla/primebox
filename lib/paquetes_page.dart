@@ -27,6 +27,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
   final List<Map<String, dynamic>> _paquetes = [];
   List<Map<String, dynamic>> _paquetesFiltrados = [];
   final TextEditingController _searchController = TextEditingController();
+  int get _cantidadPaquetes => _paquetesFiltrados.length;
 
   bool _loading = true;
   String? _estadoConexion;
@@ -724,10 +725,10 @@ class _PaquetesPageState extends State<PaquetesPage> {
                               BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
                             ],
                           ),
-                          child: const Text(
-                            'Orden Fast',
-                            style: TextStyle(color: Color(0xFF1A3365), fontWeight: FontWeight.w600),
-                          ),
+                         child: Text(
+                          'Número de paquetes: $_cantidadPaquetes',
+                          style: const TextStyle(color: Color(0xFF1A3365), fontWeight: FontWeight.w600),
+                        ),
                         ),
                       ),
                     ),

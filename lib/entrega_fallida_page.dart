@@ -141,20 +141,46 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   }
 
   // Acciones
-  void _llamar() async {
-    final uri = Uri(scheme: 'tel', path: widget.telefono);
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+void _llamar() async {
+  final tel = _normalizePhone(widget.telefono, forWhatsApp: false);
+  // Validación opcional
+  final digits = tel.replaceAll(RegExp(r'\D'), '');
+  if (digits.length < 7) {
+    _snack('Número de teléfono inválido');
+    return;
   }
 
-  void _enviarWhatsApp() async {
-    final mensaje = 'Hola, te saludamos de Primebox Driver';
-    final telefono = widget.telefono.replaceAll('+', '').replaceAll(' ', '');
-    final uri =
-        Uri.parse('https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+  final uri = Uri(scheme: 'tel', path: tel); // 'tel:+5939635680' o 'tel:09635680'
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri);
+  } else {
+    _snack('No se pudo iniciar la llamada');
   }
+}
+
+
+void _enviarWhatsApp() async {
+  final mensaje = 'Hola...';
+  // wa.me requiere número SIN '+'
+  final telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+
+  // Validación opcional
+  if (!RegExp(r'^\d{7,}$').hasMatch(telefonoWa)) {
+    _snack('Número de WhatsApp inválido');
+    return;
+  }
+
+  final uri = Uri.parse(
+    'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
+  );
+
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } else {
+    _snack('No se pudo abrir WhatsApp');
+  }
+}
+
 
   // Botones directos (como en el diseño)
   Future<void> _tomarFotografia() async {
@@ -186,6 +212,29 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
+
+/// Normaliza números de teléfono.
+/// - Quita espacios, guiones, paréntesis, puntos, etc.
+/// - Conserva un '+' solo si está al inicio.
+/// - Para WhatsApp se devuelve SIN '+', como lo requiere wa.me.
+String _normalizePhone(String input, {bool forWhatsApp = false}) {
+  if (input.isEmpty) return input;
+
+  // Quitar separadores comunes: espacios, guiones, paréntesis, puntos, barras bajas
+  var s = input.replaceAll(RegExp(r'[\s\-\(\)\.\_]'), '');
+
+  // Asegurar que si hay '+', esté SOLO al inicio
+  final hadPlus = s.startsWith('+');
+  s = s.replaceAll('+', '');
+  if (hadPlus) s = '+$s';
+
+  // Para wa.me, debe ir SIN '+'
+  if (forWhatsApp && s.startsWith('+')) {
+    s = s.substring(1);
+  }
+
+  return s;
+}
 
   // ---------------------- UI HELPERS ----------------------
   InputDecoration _input(String hint) => InputDecoration(

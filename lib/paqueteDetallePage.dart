@@ -109,40 +109,61 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
- void _llamar() async {
-  final number = widget.telefono.trim();
-  if (number.isEmpty) {
-    _snack('No hay número de teléfono');
-    return;
-  }
+  void _llamar() async {
+    final tel = _normalizePhone(widget.telefono, forWhatsApp: false);
 
-  // Limpia el número: deja dígitos y el +
-  final sanitized = number.replaceAll(RegExp(r'[^0-9+]'), '');
+    // Validación simple: al menos 7 dígitos
+    final digits = tel.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 7) {
+      _snack('Número de teléfono inválido');
+      return;
+    }
 
-  final uri = Uri(scheme: 'tel', path: sanitized);
-  final ok = await canLaunchUrl(uri);
-  if (ok) {
-    // Abre la app de teléfono/dialer con el número listo
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } else {
-    _snack('No se pudo abrir la app de llamadas.');
-  }
-}
-
-
-  void _enviarWhatsApp() async {
-    final mensaje = 'Hola, te saludamos de Primebox Driver';
-    final telefono = widget.telefono.replaceAll('+', '').replaceAll(' ', '');
-    final uri = Uri.parse(
-        'https://wa.me/$telefono?text=${Uri.encodeComponent(mensaje)}');
+    final uri = Uri(scheme: 'tel', path: tel); // soporta '+'
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      _snack('No se pudo abrir la app de llamadas.');
     }
+  }
+
+  void _enviarWhatsApp() async {
+    final mensaje = 'Hola...';
+
+    // wa.me requiere número SIN '+'
+    final telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+
+    // Validación: solo dígitos y mínimo 7
+    if (!RegExp(r'^\d{7,}$').hasMatch(telefonoWa)) {
+      _snack('Número de WhatsApp inválido');
+      return;
+    }
+
+    // Intento 1: wa.me
+    final uriWaMe = Uri.parse(
+      'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
+    );
+    if (await canLaunchUrl(uriWaMe)) {
+      await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
+      return;
+    }
+
+    // Fallback: esquema nativo (algunas ROMs lo prefieren)
+    final uriNative = Uri.parse(
+      'whatsapp://send?phone=$telefonoWa&text=${Uri.encodeComponent(mensaje)}',
+    );
+    if (await canLaunchUrl(uriNative)) {
+      await launchUrl(uriNative, mode: LaunchMode.externalApplication);
+      return;
+    }
+
+    _snack('No se pudo abrir WhatsApp.');
   }
 
   Future<void> _seleccionarImagen(int index) async {
     final picker = ImagePicker();
 
+    // Selector de origen
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -154,8 +175,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(4)),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
             ),
             const SizedBox(height: 10),
             const Text('Captura de evidencia',
@@ -251,6 +276,29 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// Normaliza números de teléfono.
+  /// - Quita espacios, guiones, paréntesis, puntos, etc.
+  /// - Conserva un '+' solo si está al inicio.
+  /// - Para WhatsApp devuelve SIN '+', como requiere wa.me.
+  String _normalizePhone(String input, {bool forWhatsApp = false}) {
+    if (input.isEmpty) return input;
+
+    // Quitar separadores comunes
+    var s = input.replaceAll(RegExp(r'[\s\-\(\)\.\_\/]'), '');
+
+    // Mantener '+' solo al inicio (si existía)
+    final hadPlus = s.startsWith('+');
+    s = s.replaceAll('+', '');
+    if (hadPlus) s = '+$s';
+
+    // Para wa.me el número debe ir sin '+'
+    if (forWhatsApp && s.startsWith('+')) {
+      s = s.substring(1);
+    }
+
+    return s;
   }
 
   // -------------- ESTILOS / UI HELPERS --------------
@@ -368,7 +416,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         centerTitle: true,
         title: Text(
           'Entrega Exitosa',
-          style: const TextStyle(fontWeight: FontWeight.w700, color: brand),
+          style: TextStyle(fontWeight: FontWeight.w700, color: brand),
         ),
         leadingWidth: 58,
         leading: Padding(
@@ -429,7 +477,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                       ),
                       _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
                       const SizedBox(width: 8),
-                      _chipButton(icon: FontAwesomeIcons.whatsapp, label: '', onTap: _enviarWhatsApp, color: const Color(0xFF25D366)),
+                      _chipButton(
+                        icon: FontAwesomeIcons.whatsapp,
+                        label: '',
+                        onTap: _enviarWhatsApp,
+                        color: const Color(0xFF25D366),
+                      ),
                     ],
                   ),
 
@@ -455,7 +508,9 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                   DropdownButtonFormField<String>(
                     value: _opcionSeleccionada,
                     decoration: _input('Parentesco'),
-                    items: _opciones.map((opcion) => DropdownMenuItem(value: opcion, child: Text(opcion))).toList(),
+                    items: _opciones
+                        .map((opcion) => DropdownMenuItem(value: opcion, child: Text(opcion)))
+                        .toList(),
                     onChanged: (v) => setState(() => _opcionSeleccionada = v!),
                   ),
                   const SizedBox(height: 10),
@@ -477,7 +532,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                         const Text(
                           'Selecciona o arrastra tus imágenes o video',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.black87,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         const Text(
@@ -541,12 +600,14 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                     final parentesco = _opcionSeleccionada;
                     final nota = _notaController.text.trim();
 
-                    final alMenosUnaFoto = _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+                    final alMenosUnaFoto =
+                        _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
                     final estadoFoto = alMenosUnaFoto
                         ? "el usuario dejó tomarse la foto"
                         : "el usuario no se dejó tomar la foto";
 
-                    final textoNota = "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
+                    final textoNota =
+                        "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
 
                     String nombreEmpresa;
                     if (_idEmpresa == "001000000000000001") {
@@ -585,12 +646,15 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                       String webhookUrl;
                       if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
                         if (_guiasMulti.isEmpty) {
-                          webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_hwhq3BLz8GVSUsEkaJYUks";
+                          webhookUrl =
+                              "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_hwhq3BLz8GVSUsEkaJYUks";
                         } else {
-                          webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fSt1DHBUxEf2tZ2iV9nVNW";
+                          webhookUrl =
+                              "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fSt1DHBUxEf2tZ2iV9nVNW";
                         }
                       } else {
-                        webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_5LWiKvLL1QnGygESVmGXFV";
+                        webhookUrl =
+                            "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_5LWiKvLL1QnGygESVmGXFV";
                       }
 
                       final response = await http.post(
@@ -662,12 +726,17 @@ class _DashedRectPainter extends CustomPainter {
 
     void drawDashedLine(Offset start, Offset end) {
       final bool isHorizontal = start.dy == end.dy;
-      final double length = isHorizontal ? (end.dx - start.dx).abs() : (end.dy - start.dy).abs();
+      final double length =
+          isHorizontal ? (end.dx - start.dx).abs() : (end.dy - start.dy).abs();
       double drawn = 0.0;
       while (drawn < length) {
         final double next = ((drawn + dashWidth).clamp(0.0, length)).toDouble();
-        final Offset p1 = isHorizontal ? Offset(start.dx + drawn, start.dy) : Offset(start.dx, start.dy + drawn);
-        final Offset p2 = isHorizontal ? Offset(start.dx + next, start.dy) : Offset(start.dx, start.dy + next);
+        final Offset p1 = isHorizontal
+            ? Offset(start.dx + drawn, start.dy)
+            : Offset(start.dx, start.dy + drawn);
+        final Offset p2 = isHorizontal
+            ? Offset(start.dx + next, start.dy)
+            : Offset(start.dx, start.dy + next);
         canvas.drawLine(p1, p2, paint);
         drawn += dashWidth + dashSpace;
       }
@@ -684,7 +753,8 @@ class _DashedRectPainter extends CustomPainter {
       for (final metric in path.computeMetrics()) {
         double distance = 0.0;
         while (distance < metric.length) {
-          final double next = ((distance + dashWidth).clamp(0.0, metric.length)).toDouble();
+          final double next =
+              ((distance + dashWidth).clamp(0.0, metric.length)).toDouble();
           final extract = metric.extractPath(distance, next);
           canvas.drawPath(extract, paint);
           distance += dashWidth + dashSpace;
@@ -692,10 +762,14 @@ class _DashedRectPainter extends CustomPainter {
       }
     }
 
-    drawDashedArc(Rect.fromCircle(center: Offset(r, r), radius: r), math.pi, math.pi / 2); // top-left
-    drawDashedArc(Rect.fromCircle(center: Offset(w - r, r), radius: r), -math.pi / 2, math.pi / 2); // top-right
-    drawDashedArc(Rect.fromCircle(center: Offset(w - r, h - r), radius: r), 0, math.pi / 2); // bottom-right
-    drawDashedArc(Rect.fromCircle(center: Offset(r, h - r), radius: r), math.pi / 2, math.pi / 2); // bottom-left
+    drawDashedArc(
+        Rect.fromCircle(center: Offset(r, r), radius: r), math.pi, math.pi / 2); // top-left
+    drawDashedArc(Rect.fromCircle(center: Offset(w - r, r), radius: r),
+        -math.pi / 2, math.pi / 2); // top-right
+    drawDashedArc(Rect.fromCircle(center: Offset(w - r, h - r), radius: r), 0,
+        math.pi / 2); // bottom-right
+    drawDashedArc(Rect.fromCircle(center: Offset(r, h - r), radius: r),
+        math.pi / 2, math.pi / 2); // bottom-left
   }
 
   @override
