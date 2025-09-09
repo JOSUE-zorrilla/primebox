@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
+import 'recolectados_centros_page.dart'; // << agrega este import
+
 
 import 'escanear_paquete_page.dart';
 import 'perfil_page.dart';
@@ -554,11 +556,17 @@ class _PaquetesPageState extends State<PaquetesPage> {
                     text: 'Evidencia de respaldo',
                     onTap: () => _proximamente('Evidencia de respaldo'),
                   ),
-                  item(
-                    icon: Icons.inventory_2_outlined,
-                    text: 'Paquetes recolectados',
-                    onTap: () => _proximamente('Paquetes recolectados'),
-                  ),
+                item(
+  icon: Icons.inventory_2_outlined,
+  text: 'Paquetes recolectados',
+  onTap: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
+    );
+  },
+),
+
                   item(
                     icon: Icons.local_shipping_outlined,
                     text: 'Recoger paquete en almacén',

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +16,8 @@ import 'package:path/path.dart' as path;
 import 'login_page.dart';
 import 'package:intl/intl.dart';
 import 'multi_guias_page.dart';
+import 'package:flutter/foundation.dart' show kIsWeb; // si no lo tienes
+
 
 class PaqueteDetallePage extends StatefulWidget {
   final String id;
@@ -225,18 +228,26 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     );
   }
 
+  // ---- NUEVO: guardar en galería con image_gallery_saver ----
+// ---- NUEVO: guardar en galería con image_gallery_saver ----
+
+
+
+
   Future<void> _subirImagenAFirebase(File image, int index) async {
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('La imagen se está cargando…'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(days: 1),
-      ),
-    );
 
+messenger.clearSnackBars(); // evita acumular mensajes previos
+messenger.showSnackBar(
+  const SnackBar(
+    content: Text('La imagen se está cargando…'),
+    behavior: SnackBarBehavior.floating,
+    duration: Duration(seconds: 2), // <-- solo 2 segundos
+  ),
+);
     try {
       final fileName = path.basename(image.path);
+      // Subir a Firebase Storage
       final ref = FirebaseStorage.instance
           .ref()
           .child('imagenesaplicacion')
@@ -425,8 +436,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
             borderRadius: BorderRadius.circular(8),
             onTap: () => Navigator.pop(context),
             child: Container(
-              width: 34,  // más pequeño
-              height: 34, // más pequeño
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: brand,
                 borderRadius: BorderRadius.circular(8),
@@ -447,7 +458,10 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 setState(() => _guiasMulti = resultado);
               }
             },
-            child: const Text('MultiGuía', style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
+            child: Text(
+              'MultiGuía',
+              style: TextStyle(color: brand, fontWeight: FontWeight.w600),
+            ),
           )
         ],
       ),
@@ -613,7 +627,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                     if (_idEmpresa == "001000000000000001") {
                       nombreEmpresa = "Primebox";
                     } else if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
-                      nombreEmpresa = "Liverpol";
+                      nombreEmpresa = "Liverpool";
                     } else {
                       nombreEmpresa = "Primebox";
                     }
@@ -650,7 +664,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                               "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_hwhq3BLz8GVSUsEkaJYUks";
                         } else {
                           webhookUrl =
-                              "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fSt1DHBUxEf2tZ2iV9nVNW";
+                              "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
                         }
                       } else {
                         webhookUrl =
