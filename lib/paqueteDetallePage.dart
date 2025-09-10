@@ -16,7 +16,7 @@ import 'package:path/path.dart' as path;
 import 'login_page.dart';
 import 'package:intl/intl.dart';
 import 'multi_guias_page.dart';
-import 'package:flutter/foundation.dart' show kIsWeb; // si no lo tienes
+
 
 
 class PaqueteDetallePage extends StatefulWidget {
@@ -623,53 +623,42 @@ messenger.showSnackBar(
                     final textoNota =
                         "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
 
-                    String nombreEmpresa;
-                    if (_idEmpresa == "001000000000000001") {
-                      nombreEmpresa = "Primebox";
-                    } else if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
-                      nombreEmpresa = "Liverpool";
-                    } else {
-                      nombreEmpresa = "Primebox";
-                    }
+              
 
-                    final body = {
-                      "Direccion": "",
-                      "FechaEstatus": timestamp.millisecondsSinceEpoch,
-                      "Foto1": _urlImagen1 ?? "",
-                      "Foto2": _urlImagen2 ?? "",
-                      "Foto3": _urlImagen3 ?? "",
+                    // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
+          // data: si hay multiguías usa esas; si no, usa el id del registro (decodificado)
+                    final String idRegistro = Uri.decodeFull(widget.id).trim();
+                    final List<String> fuentes = _guiasMulti.isNotEmpty ? _guiasMulti : [idRegistro];
+
+                    // Opcional: deduplicar por si se repite algo
+                    final Set<String> unicas = fuentes.map((e) => e.trim()).toSet();
+
+                    final Map<String, dynamic> dataPayload = {
+                      for (final guia in unicas) guia: {'idGuia': guia}
+                    };
+
+
+
+                    final body = {                     
+                      "Evidencia1": _urlImagen1 ?? "",
+                      "Evidencia2": _urlImagen2 ?? "",
+                      "Evidencia3": _urlImagen3 ?? "",
                       "Latitude": _posicionActual?.latitude.toString() ?? "",
                       "Longitude": _posicionActual?.longitude.toString() ?? "",
-                      "NombreDriver": globalNombre ?? "SinNombre",
-                      "NombreEmpresa": nombreEmpresa,
-                      "NombrePaquete": widget.id,
+                      "NombreDriver": globalNombre ?? "SinNombre",                     
                       "Nota": textoNota,
+                      "TimeStamp" : DateTime.now().millisecondsSinceEpoch,
                       "Parentesco": parentesco,
-                      "Recibe": recibe,
+                      "NombreRecibe": recibe,
                       "YYYYMMDD": yyyyMMdd,
-                      "YYYYMMDDHHmmss": yyyyMMddHHmmss,
-                      "idCiudad": globalIdCiudad ?? "SinCiudad",
-                      "idDriver": globalUserId ?? "",
-                      "idEmpresa": _idEmpresa ?? "",
-                      "idMovimiento": DateTime.now().millisecondsSinceEpoch.toString(),
-                      "idPaquete": widget.id,
-                      "Data": _guiasMulti,
+                      "YYYYMMDDHHMMSS": yyyyMMddHHmmss,                     
+                      "idDriver": globalUserId ?? "", 
+                      "data": dataPayload,
                     };
 
                     try {
-                      String webhookUrl;
-                      if (_idEmpresa == "j9Zgq4PzAYiFzJfPMrrccY") {
-                        if (_guiasMulti.isEmpty) {
-                          webhookUrl =
-                              "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_hwhq3BLz8GVSUsEkaJYUks";
-                        } else {
-                          webhookUrl =
-                              "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
-                        }
-                      } else {
-                        webhookUrl =
-                            "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_5LWiKvLL1QnGygESVmGXFV";
-                      }
+                      const webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
+
 
                       final response = await http.post(
                         Uri.parse(webhookUrl),

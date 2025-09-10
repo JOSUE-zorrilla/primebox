@@ -14,6 +14,7 @@ import 'package:path/path.dart' as path;
 import 'login_page.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'fallidas_multientrega_page.dart';
+import 'package:intl/intl.dart';  // al inicio del archivo
 
 class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
@@ -300,6 +301,21 @@ String _normalizePhone(String input, {bool forWhatsApp = false}) {
       child: Container(padding: const EdgeInsets.all(14), child: child),
     );
   }
+Future<String> _fetchIdPBFromRef(String tnRef) async {
+  try {
+    final snap = await FirebaseDatabase.instance
+        .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$tnRef/idPB')
+        .get();
+
+    final val = snap.value?.toString().trim();
+    if (snap.exists && val != null && val.isNotEmpty) {
+      return val; // <- este es el idPB real
+    }
+  } catch (_) {}
+  return tnRef; // fallback por si no existe el campo (evita romper flujo)
+}
+
+
 
   // ---------------------- BUILD ----------------------
   @override
@@ -527,14 +543,8 @@ String _normalizePhone(String input, {bool forWhatsApp = false}) {
 
                       final codigoFalla = 'FL$intento';
                       final fechaAhora = DateTime.now();
-                      final yyyyMMddHHmmss =
-                          '${fechaAhora.year.toString().padLeft(4, '0')}'
-                          '${fechaAhora.month.toString().padLeft(2, '0')}'
-                          '${fechaAhora.day.toString().padLeft(2, '0')}'
-                          '${fechaAhora.hour.toString().padLeft(2, '0')}'
-                          '${fechaAhora.minute.toString().padLeft(2, '0')}'
-                          '${fechaAhora.second.toString().padLeft(2, '0')}';
-
+final formato = DateFormat('yyyy-MM-dd HH:mm:ss');
+final yyyyMMddHHmmss = formato.format(fechaAhora);
                       await ref.update({
                         'Estatus': codigoFalla,
                         'Fallos': intento,
@@ -545,34 +555,62 @@ String _normalizePhone(String input, {bool forWhatsApp = false}) {
                           await Geolocator.getCurrentPosition(
                               desiredAccuracy: LocationAccuracy.high);
 
+                              final nota = _notaController.text.trim();
+
+                              // Fuentes: si hay multientrega usa esas; si no, usa el id del registro
+                          final String idRegistro = Uri.decodeFull(widget.tnReference).trim();
+                          final List<String> fuentes = _guiasFallidas.isNotEmpty ? _guiasFallidas : [idRegistro];
+
+                          // (Opcional) quitar duplicadas/espacios
+                          final Set<String> unicas = fuentes.map((e) => e.trim()).toSet();
+
+                          // Mapa con el formato requerido: { guia: { "idGuia": guia } }
+                          // Fuentes: si hay multientrega usa esas; si no, usa el id del registro (tnReference)
+                            final String tnRefActual = Uri.decodeFull(widget.tnReference).trim();
+                            final List<String> tnRefs = _guiasFallidas.isNotEmpty ? _guiasFallidas : [tnRefActual];
+
+                            // Resolver cada tnReference -> idPB real
+                            final List<String> idsPB = await Future.wait(
+                              tnRefs.map((r) => _fetchIdPBFromRef(r)),
+                            );
+
+                            // (Opcional) quitar duplicadas/espacios
+                            final Set<String> unicasIdPB = idsPB.map((e) => e.trim()).toSet();
+
+                            // Mapa con la estructura requerida por el webhook:
+                            // { idPB: { "idGuia": idPB } }  <-- Nota: propiedad interna sigue siendo "idGuia"
+                            final Map<String, dynamic> dataPayload = {
+                              for (final idPB in unicasIdPB) idPB: {"idGuia": idPB}
+                            };
+
+                            // y más abajo en tu body:
+                            // "data": dataPayload,
+
+
+
                       final now = DateTime.now();
                       final yyyyMMdd =
                           '${now.year.toString().padLeft(4, '0')}-'
                           '${now.month.toString().padLeft(2, '0')}-'
                           '${now.day.toString().padLeft(2, '0')}';
 
-                      final Map<String, dynamic> body = {
-                        "CodigoFalla": codigoFalla,
-                        "Direccion": "",
-                        "FotoEvidencia": _urlImagen ?? "",
-                        "Intentos": intento,
-                        "Latitude": posicion.latitude.toString(),
-                        "Longitude": posicion.longitude.toString(),
-                        "MotivoFallo": _motivo,
-                        "NombreDriver": globalNombre ?? "SinNombre",
-                        "NombrePaquete": idPaquete,
-                        "tnReference": widget.tnReference,
-                        "idPaquete": idPaquete,
-                        "Timestamp": DateTime.now().millisecondsSinceEpoch,
-                        "idConductor": globalUserId ?? "",
-                        "idEmpresa": _idEmpresa ?? "",
-                        "data": _guiasFallidas,
-                        "YYYYMMDD": yyyyMMdd,
-                        "YYYYMMDDHHmmss": int.parse(yyyyMMddHHmmss),
-                      };
+                          final Map<String, dynamic> body = {
+                            "Evidencia1": _urlImagen ?? "",
+                            "Intentos": intento,
+                            "Latitude": posicion.latitude.toString(),
+                            "Longitude": posicion.longitude.toString(),
+                            "MotivoFallo": _motivo,
+                            "NombreDriver": globalNombre ?? "SinNombre",
+                            "NotaExtra": nota, // <-- agregado
+                            "Timestamp": DateTime.now().millisecondsSinceEpoch,
+                            "idConductor": globalUserId ?? "",
+                            "data": dataPayload,
+                            "YYYYMMDD": yyyyMMdd,
+                            "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
+                          };
 
                       final response = await http.post(
-                        Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_bzSiG1tauvQ5us7gtyQKEd'),
+                        Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_avzsN6aBS9zC1yY5H6xxtq'),
                         headers: {HttpHeaders.contentTypeHeader: 'application/json'},
                         body: jsonEncode(body),
                       );
