@@ -8,7 +8,6 @@ import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'recolectados_centros_page.dart'; // << agrega este import
 
-
 import 'escanear_paquete_page.dart';
 import 'perfil_page.dart';
 import 'paqueteDetallePage.dart';
@@ -556,17 +555,16 @@ class _PaquetesPageState extends State<PaquetesPage> {
                     text: 'Evidencia de respaldo',
                     onTap: () => _proximamente('Evidencia de respaldo'),
                   ),
-                item(
-  icon: Icons.inventory_2_outlined,
-  text: 'Paquetes recolectados',
-  onTap: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
-    );
-  },
-),
-
+                  item(
+                    icon: Icons.inventory_2_outlined,
+                    text: 'Paquetes recolectados',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
+                      );
+                    },
+                  ),
                   item(
                     icon: Icons.local_shipping_outlined,
                     text: 'Recoger paquete en almacén',
@@ -733,10 +731,10 @@ class _PaquetesPageState extends State<PaquetesPage> {
                               BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
                             ],
                           ),
-                         child: Text(
-                          'Número de paquetes: $_cantidadPaquetes',
-                          style: const TextStyle(color: Color(0xFF1A3365), fontWeight: FontWeight.w600),
-                        ),
+                          child: Text(
+                            'Número de paquetes: $_cantidadPaquetes',
+                            style: const TextStyle(color: Color(0xFF1A3365), fontWeight: FontWeight.w600),
+                          ),
                         ),
                       ),
                     ),
@@ -825,6 +823,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                         snapshot.child('TnReference').value?.toString() ?? '';
                                     final telefono =
                                         snapshot.child('Telefono').value?.toString() ?? '';
+                                    // final idPaquetePB = snapshot.child('idPB').value?.toString() ?? ''; // (si lo necesitas)
 
                                     try {
                                       await _enviarWebhookRP(
@@ -862,6 +861,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                           telefono: telefono,
                                           tnReference: tnReference,
                                           destinatario: paquete['Destinatario'],
+                                          // >>>>>>>>>>>>>>>>> NUEVO: enviamos el ID del registro
+                                          paqueteId: paqueteId,
                                         ),
                                       ),
                                     );

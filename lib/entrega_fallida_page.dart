@@ -14,18 +14,20 @@ import 'package:path/path.dart' as path;
 import 'login_page.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'fallidas_multientrega_page.dart';
-import 'package:intl/intl.dart';  // al inicio del archivo
+import 'package:intl/intl.dart';
 
 class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
-  final String tnReference;
+  final String tnReference;   // Referencia "humana" (ruta Historal)
   final String destinatario;
+  final String paqueteId;     // idPB (clave real en RTDB) recibido desde la primera pantalla
 
   const EntregaFallidaPage({
     super.key,
     required this.telefono,
     required this.tnReference,
     required this.destinatario,
+    required this.paqueteId,
   });
 
   @override
@@ -33,16 +35,13 @@ class EntregaFallidaPage extends StatefulWidget {
 }
 
 class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
-  // Marca (rojo principal del diseño)
-  static const Color brand = Color(0xFFE04B41); // ajusta si quieres otro tono
+  static const Color brand = Color(0xFFE04B41);
 
   final TextEditingController _notaController = TextEditingController();
-
-  // Imagen única (evidencia fallida)
   final List<File?> _imagenes = [null];
   String? _urlImagen;
 
-  // Multi-entrega
+  // Multi-entrega (idPB adicionales que vienen de MultiEntrega)
   List<String> _guiasFallidas = [];
 
   // Empresa y ubicación
@@ -61,11 +60,42 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
     'Otro',
   ];
 
+  // id del paquete actual (idPB). Si no viene en paqueteId, lo resolvemos desde Historal/{tnRef}/idPB
+  String? _idPBActual;
+
   @override
   void initState() {
     super.initState();
     _obtenerUbicacion();
     _obtenerIdEmpresa();
+
+    // Resolver _idPBActual
+    () async {
+      final fromWidget = widget.paqueteId.trim();
+      if (fromWidget.isNotEmpty) {
+        setState(() => _idPBActual = fromWidget);
+      } else {
+        final resolved = await _fetchIdPBFromRef(widget.tnReference, fallbackToTnRef: false);
+        setState(() => _idPBActual = resolved);
+      }
+    }();
+  }
+
+  Future<void> _alert(String title, String message) async {
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: SelectableText(message.isEmpty ? '(vacío)' : message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ---------------------- LÓGICA ----------------------
@@ -141,49 +171,38 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
     }
   }
 
-  // Acciones
-void _llamar() async {
-  final tel = _normalizePhone(widget.telefono, forWhatsApp: false);
-  // Validación opcional
-  final digits = tel.replaceAll(RegExp(r'\D'), '');
-  if (digits.length < 7) {
-    _snack('Número de teléfono inválido');
-    return;
+  void _llamar() async {
+    final tel = _normalizePhone(widget.telefono, forWhatsApp: false);
+    final digits = tel.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 7) {
+      _snack('Número de teléfono inválido');
+      return;
+    }
+    final uri = Uri(scheme: 'tel', path: tel);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      _snack('No se pudo iniciar la llamada');
+    }
   }
 
-  final uri = Uri(scheme: 'tel', path: tel); // 'tel:+5939635680' o 'tel:09635680'
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri);
-  } else {
-    _snack('No se pudo iniciar la llamada');
-  }
-}
-
-
-void _enviarWhatsApp() async {
-  final mensaje = 'Hola...';
-  // wa.me requiere número SIN '+'
-  final telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
-
-  // Validación opcional
-  if (!RegExp(r'^\d{7,}$').hasMatch(telefonoWa)) {
-    _snack('Número de WhatsApp inválido');
-    return;
+  void _enviarWhatsApp() async {
+    final mensaje = 'Hola...';
+    final telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+    if (!RegExp(r'^\d{7,}$').hasMatch(telefonoWa)) {
+      _snack('Número de WhatsApp inválido');
+      return;
+    }
+    final uri = Uri.parse(
+      'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
+    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      _snack('No se pudo abrir WhatsApp');
+    }
   }
 
-  final uri = Uri.parse(
-    'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
-  );
-
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } else {
-    _snack('No se pudo abrir WhatsApp');
-  }
-}
-
-
-  // Botones directos (como en el diseño)
   Future<void> _tomarFotografia() async {
     final status = await Permission.camera.request();
     if (!status.isGranted) {
@@ -198,7 +217,7 @@ void _enviarWhatsApp() async {
   }
 
   Future<void> _abrirGaleria() async {
-    final status = await Permission.photos.request(); // iOS; en Android se maneja por app
+    final status = await Permission.photos.request();
     if (!status.isGranted) {
       _snack('Permiso de galería denegado');
       return;
@@ -214,28 +233,17 @@ void _enviarWhatsApp() async {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-/// Normaliza números de teléfono.
-/// - Quita espacios, guiones, paréntesis, puntos, etc.
-/// - Conserva un '+' solo si está al inicio.
-/// - Para WhatsApp se devuelve SIN '+', como lo requiere wa.me.
-String _normalizePhone(String input, {bool forWhatsApp = false}) {
-  if (input.isEmpty) return input;
-
-  // Quitar separadores comunes: espacios, guiones, paréntesis, puntos, barras bajas
-  var s = input.replaceAll(RegExp(r'[\s\-\(\)\.\_]'), '');
-
-  // Asegurar que si hay '+', esté SOLO al inicio
-  final hadPlus = s.startsWith('+');
-  s = s.replaceAll('+', '');
-  if (hadPlus) s = '+$s';
-
-  // Para wa.me, debe ir SIN '+'
-  if (forWhatsApp && s.startsWith('+')) {
-    s = s.substring(1);
+  String _normalizePhone(String input, {bool forWhatsApp = false}) {
+    if (input.isEmpty) return input;
+    var s = input.replaceAll(RegExp(r'[\s\-\(\)\.\_]'), '');
+    final hadPlus = s.startsWith('+');
+    s = s.replaceAll('+', '');
+    if (hadPlus) s = '+$s';
+    if (forWhatsApp && s.startsWith('+')) {
+      s = s.substring(1);
+    }
+    return s;
   }
-
-  return s;
-}
 
   // ---------------------- UI HELPERS ----------------------
   InputDecoration _input(String hint) => InputDecoration(
@@ -288,7 +296,6 @@ String _normalizePhone(String input, {bool forWhatsApp = false}) {
     );
   }
 
-  // Caja punteada
   Widget _dashedBox({required Widget child}) {
     return CustomPaint(
       painter: _DashedRectPainter(
@@ -301,34 +308,46 @@ String _normalizePhone(String input, {bool forWhatsApp = false}) {
       child: Container(padding: const EdgeInsets.all(14), child: child),
     );
   }
-Future<String> _fetchIdPBFromRef(String tnRef) async {
-  try {
-    final snap = await FirebaseDatabase.instance
-        .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$tnRef/idPB')
-        .get();
 
-    final val = snap.value?.toString().trim();
-    if (snap.exists && val != null && val.isNotEmpty) {
-      return val; // <- este es el idPB real
+  // Helper: obtener idPB desde Historal/$tnRef/idPB
+  Future<String?> _fetchIdPBFromRef(String tnRef, {bool fallbackToTnRef = false}) async {
+    try {
+      final key = Uri.decodeFull(tnRef).trim();
+      final snap = await FirebaseDatabase.instance
+          .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$key/idPB')
+          .get();
+
+      final val = snap.value?.toString().trim();
+      if (snap.exists && val != null && val.isNotEmpty) {
+        return val; // idPB real
+      }
+    } catch (_) {}
+    return fallbackToTnRef ? tnRef : null;
+  }
+
+  /// Conjunto de idPBs para envío: idPB actual + seleccionados en multientrega
+  List<String> get _todasLasGuias {
+    final set = <String>{};
+    if ((_idPBActual ?? '').trim().isNotEmpty) set.add(_idPBActual!.trim());
+    for (final g in _guiasFallidas) {
+      final v = g.trim();
+      if (v.isNotEmpty) set.add(v);
     }
-  } catch (_) {}
-  return tnRef; // fallback por si no existe el campo (evita romper flujo)
-}
-
-
+    return set.toList();
+  }
 
   // ---------------------- BUILD ----------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // fondo blanco
+      backgroundColor: Colors.white,
       appBar: AppBar(
         systemOverlayStyle: const SystemUiOverlayStyle(
           statusBarColor: Colors.white,
-          statusBarIconBrightness: Brightness.dark, // Android
-          statusBarBrightness: Brightness.light,    // iOS
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
         ),
-        backgroundColor: Colors.white, // AppBar blanco
+        backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
         title: const Text('Entrega Fallida',
@@ -353,10 +372,17 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
             onPressed: () async {
               final resultado = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const FallidasMultiEntregaPage()),
+                MaterialPageRoute(
+                  builder: (_) => FallidasMultiEntregaPage(
+                    // Pasamos idPB actual; si es null/vacío, mandamos lista vacía
+                    initialGuias: _idPBActual != null && _idPBActual!.trim().isNotEmpty
+                        ? [_idPBActual!]
+                        : const [],
+                  ),
+                ),
               );
               if (resultado != null && resultado is List<String>) {
-                setState(() => _guiasFallidas = resultado);
+                setState(() => _guiasFallidas = resultado); // resultado = lista de idPBs
               }
             },
             child: const Text('MultiEntrega',
@@ -397,7 +423,7 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
 
               const SizedBox(height: 14),
 
-              // No. Guía y titular
+              // No. Guía y titular (UI humana: tnReference)
               const Text('No. Guía:', style: TextStyle(fontSize: 12, color: Colors.black54)),
               const SizedBox(height: 2),
               Text('#${widget.tnReference}', style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -413,16 +439,18 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
               DropdownButtonFormField<String>(
                 value: _motivo,
                 decoration: _input('Selecciona una opción').copyWith(
-                  // cajita roja con la flecha, como el diseño
                   suffixIcon: Container(
                     margin: const EdgeInsets.only(right: 2),
                     decoration: BoxDecoration(
                       color: brand,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: Colors.white),
+                    child: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: Colors.white,
+                    ),
                   ),
+                  suffixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
                 items: _motivos
                     .map((mot) => DropdownMenuItem(value: mot, child: Text(mot)))
@@ -444,17 +472,15 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
                       style: TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 2),
-                    const Text('(Png y Jpg máx 1gb)',
-                        style: TextStyle(fontSize: 11, color: Colors.black54)),
+                    const Text('(Png y Jpg máx 1gb)', style: TextStyle(fontSize: 11, color: Colors.black54)),
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        // Botón oscuro (como en diseño)
                         Expanded(
                           child: ElevatedButton(
                             onPressed: _tomarFotografia,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0F1A2B), // navy oscuro
+                              backgroundColor: const Color(0xFF0F1A2B),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -479,12 +505,16 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
                         ),
                       ],
                     ),
-                    // Vista previa si hay imagen
                     if (_imagenes[0] != null) ...[
                       const SizedBox(height: 12),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: Image.file(_imagenes[0]!, height: 150, width: double.infinity, fit: BoxFit.cover),
+                        child: Image.file(
+                          _imagenes[0]!,
+                          height: 150,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ]
                   ],
@@ -499,9 +529,10 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
                 decoration: _input('Observaciones adicionales...'),
               ),
 
-              if (_guiasFallidas.isNotEmpty) ...[
+              // Mostrar SIEMPRE la lista combinada (idPB actual + adicionales)
+              if (_todasLasGuias.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                _sectionTitle('Guías fallidas registradas'),
+                _sectionTitle('Guías fallidas registradas (idPB)'),
                 Container(
                   decoration: BoxDecoration(
                     color: const Color(0xFFF9FAFB),
@@ -509,11 +540,11 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
                     border: Border.all(color: const Color(0xFFE6E6E6)),
                   ),
                   child: Column(
-                    children: _guiasFallidas
-                        .map((id) => ListTile(
+                    children: _todasLasGuias
+                        .map((idPB) => ListTile(
                               dense: true,
                               leading: const Icon(Icons.qr_code),
-                              title: Text(id),
+                              title: Text(idPB),
                             ))
                         .toList(),
                   ),
@@ -527,12 +558,15 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
                 height: 48,
                 child: ElevatedButton(
                   onPressed: () async {
-                    final idPaquete = widget.tnReference;
+                    // Historal se sigue actualizando por tnReference (ruta humana)
+                    final idHistoral = Uri.decodeFull(widget.tnReference).trim();
                     final DatabaseReference ref = FirebaseDatabase.instance
-                        .ref("projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idPaquete");
+                        .ref("projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idHistoral");
 
                     try {
                       final snapshot = await ref.child('Fallos').get();
+                      final snapshotIdPB = await ref.child('idPB').get();
+
                       int intento = 1;
                       if (snapshot.exists) {
                         final valor = snapshot.value;
@@ -541,10 +575,12 @@ Future<String> _fetchIdPBFromRef(String tnRef) async {
                             : 1;
                       }
 
+                      final String idPBEnHistoral = snapshotIdPB.value?.toString() ?? '';
+
                       final codigoFalla = 'FL$intento';
                       final fechaAhora = DateTime.now();
-final formato = DateFormat('yyyy-MM-dd HH:mm:ss');
-final yyyyMMddHHmmss = formato.format(fechaAhora);
+                      final formato = DateFormat('yyyy-MM-dd HH:mm:ss');
+                      final yyyyMMddHHmmss = formato.format(fechaAhora);
                       await ref.update({
                         'Estatus': codigoFalla,
                         'Fallos': intento,
@@ -552,62 +588,64 @@ final yyyyMMddHHmmss = formato.format(fechaAhora);
                       });
 
                       final Position posicion = _posicionActual ??
-                          await Geolocator.getCurrentPosition(
-                              desiredAccuracy: LocationAccuracy.high);
+                          await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
 
-                              final nota = _notaController.text.trim();
+                      final nota = _notaController.text.trim();
 
-                              // Fuentes: si hay multientrega usa esas; si no, usa el id del registro
-                          final String idRegistro = Uri.decodeFull(widget.tnReference).trim();
-                          final List<String> fuentes = _guiasFallidas.isNotEmpty ? _guiasFallidas : [idRegistro];
+                      // idPBs para payload (actual + multientrega)
+                      final List<String> referencias = _todasLasGuias;
+                      final bool esMulti = referencias.length > 1;
 
-                          // (Opcional) quitar duplicadas/espacios
-                          final Set<String> unicas = fuentes.map((e) => e.trim()).toSet();
+                      Map<String, dynamic> dataPayload;
 
-                          // Mapa con el formato requerido: { guia: { "idGuia": guia } }
-                          // Fuentes: si hay multientrega usa esas; si no, usa el id del registro (tnReference)
-                            final String tnRefActual = Uri.decodeFull(widget.tnReference).trim();
-                            final List<String> tnRefs = _guiasFallidas.isNotEmpty ? _guiasFallidas : [tnRefActual];
+                      if (esMulti) {
+                        // MULTI: ya tenemos idPBs listos
+                        final Set<String> unicasIdPB = referencias
+                            .map((e) => e.trim())
+                            .where((e) => e.isNotEmpty)
+                            .toSet();
 
-                            // Resolver cada tnReference -> idPB real
-                            final List<String> idsPB = await Future.wait(
-                              tnRefs.map((r) => _fetchIdPBFromRef(r)),
-                            );
+                        if (unicasIdPB.isEmpty) {
+                          await _alert('Faltan idPB', 'No hay paquetes válidos para enviar.');
+                          return;
+                        }
 
-                            // (Opcional) quitar duplicadas/espacios
-                            final Set<String> unicasIdPB = idsPB.map((e) => e.trim()).toSet();
+                        dataPayload = {for (final id in unicasIdPB) id: {"idGuia": id}};
+                      } else {
+                        // SINGLE: usa paqueteId (idPB) recibido
+                        final String idParaEnviar = (widget.paqueteId).trim().isNotEmpty
+                            ? widget.paqueteId.trim()
+                            : (_idPBActual ?? '').trim();
 
-                            // Mapa con la estructura requerida por el webhook:
-                            // { idPB: { "idGuia": idPB } }  <-- Nota: propiedad interna sigue siendo "idGuia"
-                            final Map<String, dynamic> dataPayload = {
-                              for (final idPB in unicasIdPB) idPB: {"idGuia": idPB}
-                            };
+                        if (idParaEnviar.isEmpty) {
+                          await _alert(
+                            "Falta paqueteId",
+                            "No se recibió un paqueteId (idPB) válido desde la pantalla anterior.",
+                          );
+                          return;
+                        }
 
-                            // y más abajo en tu body:
-                            // "data": dataPayload,
-
-
+                        dataPayload = {idParaEnviar: {"idGuia": idParaEnviar}};
+                      }
 
                       final now = DateTime.now();
                       final yyyyMMdd =
-                          '${now.year.toString().padLeft(4, '0')}-'
-                          '${now.month.toString().padLeft(2, '0')}-'
-                          '${now.day.toString().padLeft(2, '0')}';
+                          '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
-                          final Map<String, dynamic> body = {
-                            "Evidencia1": _urlImagen ?? "",
-                            "Intentos": intento,
-                            "Latitude": posicion.latitude.toString(),
-                            "Longitude": posicion.longitude.toString(),
-                            "MotivoFallo": _motivo,
-                            "NombreDriver": globalNombre ?? "SinNombre",
-                            "NotaExtra": nota, // <-- agregado
-                            "Timestamp": DateTime.now().millisecondsSinceEpoch,
-                            "idConductor": globalUserId ?? "",
-                            "data": dataPayload,
-                            "YYYYMMDD": yyyyMMdd,
-                            "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
-                          };
+                      final Map<String, dynamic> body = {
+                        "Evidencia1": _urlImagen ?? "",
+                        "Intentos": intento,
+                        "Latitude": posicion.latitude.toString(),
+                        "Longitude": posicion.longitude.toString(),
+                        "MotivoFalla": _motivo,
+                        "NombreDriver": globalNombre ?? "SinNombre",
+                        "NotaExtra": nota,
+                        "Timestamp": DateTime.now().millisecondsSinceEpoch,
+                        "idDriver": globalUserId ?? "",
+                        "data": dataPayload, // <<<<< idPBs como keys
+                        "YYYYMMDD": yyyyMMdd,
+                        "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
+                      };
 
                       final response = await http.post(
                         Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_avzsN6aBS9zC1yY5H6xxtq'),
