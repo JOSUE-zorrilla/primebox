@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data'; // NUEVO: bytes para preview y subida
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -16,8 +17,7 @@ import 'package:path/path.dart' as path;
 import 'login_page.dart';
 import 'package:intl/intl.dart';
 import 'multi_guias_page.dart';
-
-
+import 'package:flutter_image_compress/flutter_image_compress.dart'; // NUEVO
 
 class PaqueteDetallePage extends StatefulWidget {
   final String id;
@@ -54,6 +54,9 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   String? _urlImagen2;
   String? _urlImagen3;
   final List<File?> _imagenes = [null, null, null];
+
+  // NUEVO: previews comprimidos (lo que realmente subimos)
+  final List<Uint8List?> _previewsComprimidos = [null, null, null];
 
   List<String> _guiasMulti = [];
 
@@ -130,37 +133,93 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
-  void _enviarWhatsApp() async {
-    final mensaje = 'Hola...';
+  Future<void> _enviarWhatsApp() async {
+    final String mensaje = 'Hola...';
+    final String telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
 
-    // wa.me requiere número SIN '+'
-    final telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+    try {
+      // 1) Validación de número
+      if (!RegExp(r'^\d{7,15}$').hasMatch(telefonoWa)) {
+        throw 'Número inválido. Debe contener solo dígitos (7–15). Valor recibido: "$telefonoWa".';
+      }
 
-    // Validación: solo dígitos y mínimo 7
-    if (!RegExp(r'^\d{7,}$').hasMatch(telefonoWa)) {
-      _snack('Número de WhatsApp inválido');
-      return;
+      // 2) Construcción de URIs
+      final Uri uriWaMe = Uri.parse(
+        'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
+      );
+      final Uri uriNative = Uri.parse(
+        'whatsapp://send?phone=$telefonoWa&text=${Uri.encodeComponent(mensaje)}',
+      );
+
+      // 3) Flujo por plataforma
+      if (kIsWeb) {
+        // En web solo podemos abrir wa.me
+        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
+        if (!ok) {
+          throw 'No se pudo abrir el enlace web (wa.me). Verifica que el navegador permita abrir pestañas externas.';
+        }
+        return;
+      }
+
+      // 4) En Android/iOS intentamos primero el esquema nativo (app instalada)
+      bool intentadoNativo = false;
+
+      try {
+        final puedeNativo = await canLaunchUrl(uriNative);
+        if (puedeNativo) {
+          intentadoNativo = true;
+          final ok = await launchUrl(uriNative, mode: LaunchMode.externalApplication);
+          if (!ok) {
+            throw 'La app de WhatsApp no respondió al intento de apertura.';
+          }
+          return; // Listo
+        }
+      } catch (e) {
+        // canLaunch/launch pueden lanzar PlatformException en algunos OEMs
+        throw 'Error al invocar la app de WhatsApp: $e';
+      }
+
+      // 5) Fallback: abrir wa.me en navegador
+      final puedeWeb = await canLaunchUrl(uriWaMe);
+      if (puedeWeb) {
+        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
+        if (!ok) {
+          throw 'No se pudo abrir el enlace wa.me en el navegador.';
+        }
+        return;
+      }
+
+      // 6) Si llegamos aquí, explicamos la razón probable
+      String razon = 'No fue posible abrir WhatsApp ni el enlace web. ';
+      if (!intentadoNativo) {
+        razon += 'Parece que WhatsApp no está instalado o el dispositivo bloqueó la intención.';
+      } else {
+        razon += 'El sistema bloqueó la apertura o no hay navegador disponible.';
+      }
+      throw razon;
+    } on FormatException catch (e) {
+      _snack('Número/URI con formato inválido: $e');
+    } catch (e) {
+      _snack('No se pudo abrir WhatsApp: $e');
     }
+  }
 
-    // Intento 1: wa.me
-    final uriWaMe = Uri.parse(
-      'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
+  // ===== COMPRESIÓN =====
+
+  /// Comprime una imagen a JPEG con lado largo máx. 1600px y calidad 75.
+  /// Devuelve bytes listos para subir con putData.
+  Future<Uint8List> _compressImage(File file) async {
+    final originalBytes = await file.readAsBytes();
+    final result = await FlutterImageCompress.compressWithList(
+      originalBytes,
+      minWidth: 1600,
+      minHeight: 1600,
+      quality: 75,            // baja más si quieres menor peso (60–70)
+      rotate: 0,
+      keepExif: true,
+      format: CompressFormat.jpeg,
     );
-    if (await canLaunchUrl(uriWaMe)) {
-      await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
-      return;
-    }
-
-    // Fallback: esquema nativo (algunas ROMs lo prefieren)
-    final uriNative = Uri.parse(
-      'whatsapp://send?phone=$telefonoWa&text=${Uri.encodeComponent(mensaje)}',
-    );
-    if (await canLaunchUrl(uriNative)) {
-      await launchUrl(uriNative, mode: LaunchMode.externalApplication);
-      return;
-    }
-
-    _snack('No se pudo abrir WhatsApp.');
+    return Uint8List.fromList(result);
   }
 
   Future<void> _seleccionarImagen(int index) async {
@@ -196,7 +255,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 Navigator.pop(context);
                 final status = await Permission.photos.request(); // iOS
                 if (status.isGranted) {
-                  final picked = await picker.pickImage(source: ImageSource.gallery);
+                  final picked = await picker.pickImage(
+                    source: ImageSource.gallery,
+                    maxWidth: 2000,
+                    maxHeight: 2000,
+                    imageQuality: 90,
+                  );
                   if (picked != null) {
                     await _subirImagenAFirebase(File(picked.path), index);
                   }
@@ -212,7 +276,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 Navigator.pop(context);
                 final status = await Permission.camera.request();
                 if (status.isGranted) {
-                  final picked = await picker.pickImage(source: ImageSource.camera);
+                  final picked = await picker.pickImage(
+                    source: ImageSource.camera,
+                    maxWidth: 1600,
+                    maxHeight: 1600,
+                    imageQuality: 85,
+                  );
                   if (picked != null) {
                     await _subirImagenAFirebase(File(picked.path), index);
                   }
@@ -228,36 +297,42 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     );
   }
 
-  // ---- NUEVO: guardar en galería con image_gallery_saver ----
-// ---- NUEVO: guardar en galería con image_gallery_saver ----
-
-
-
-
+  // ---- NUEVO: subida comprimida ----
   Future<void> _subirImagenAFirebase(File image, int index) async {
     final messenger = ScaffoldMessenger.of(context);
 
-messenger.clearSnackBars(); // evita acumular mensajes previos
-messenger.showSnackBar(
-  const SnackBar(
-    content: Text('La imagen se está cargando…'),
-    behavior: SnackBarBehavior.floating,
-    duration: Duration(seconds: 2), // <-- solo 2 segundos
-  ),
-);
+    messenger.clearSnackBars(); // evita acumular mensajes previos
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('La imagen se está cargando…'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(days: 1), // se oculta al finalizar
+      ),
+    );
+
     try {
-      final fileName = path.basename(image.path);
-      // Subir a Firebase Storage
+      // 1) Comprimir a JPEG
+      final Uint8List compressed = await _compressImage(image);
+
+      // 2) Subir a Firebase Storage con putData (bytes) y metadata
+      final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
       final ref = FirebaseStorage.instance
           .ref()
           .child('imagenesaplicacion')
-          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
+          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
 
-      await ref.putFile(image);
+      await ref.putData(
+        compressed,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+
       final url = await ref.getDownloadURL();
 
+      // 3) Actualizar estado: guardamos file y el preview comprimido
       setState(() {
         _imagenes[index] = image;
+        _previewsComprimidos[index] = compressed;
+
         if (index == 0) {
           _urlImagen1 = url;
         } else if (index == 1) {
@@ -383,12 +458,17 @@ messenger.showSnackBar(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFFE6E6E6)),
         ),
-        child: _imagenes[index] != null
+        child: _previewsComprimidos[index] != null
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
+                child: Image.memory(_previewsComprimidos[index]!, fit: BoxFit.cover),
               )
-            : const Icon(Icons.add_a_photo_outlined, size: 26, color: Colors.black45),
+            : (_imagenes[index] != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
+                  )
+                : const Icon(Icons.add_a_photo_outlined, size: 26, color: Colors.black45)),
       ),
     );
   }
@@ -623,10 +703,8 @@ messenger.showSnackBar(
                     final textoNota =
                         "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
 
-              
-
                     // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
-          // data: si hay multiguías usa esas; si no, usa el id del registro (decodificado)
+                    // data: si hay multiguías usa esas; si no, usa el id del registro (decodificado)
                     final String idRegistro = Uri.decodeFull(widget.id).trim();
                     final List<String> fuentes = _guiasMulti.isNotEmpty ? _guiasMulti : [idRegistro];
 
@@ -637,28 +715,25 @@ messenger.showSnackBar(
                       for (final guia in unicas) guia: {'idGuia': guia}
                     };
 
-
-
-                    final body = {                     
+                    final body = {
                       "Evidencia1": _urlImagen1 ?? "",
                       "Evidencia2": _urlImagen2 ?? "",
                       "Evidencia3": _urlImagen3 ?? "",
                       "Latitude": _posicionActual?.latitude.toString() ?? "",
                       "Longitude": _posicionActual?.longitude.toString() ?? "",
-                      "NombreDriver": globalNombre ?? "SinNombre",                     
+                      "NombreDriver": globalNombre ?? "SinNombre",
                       "Nota": textoNota,
-                      "TimeStamp" : DateTime.now().millisecondsSinceEpoch,
+                      "TimeStamp": DateTime.now().millisecondsSinceEpoch,
                       "Parentesco": parentesco,
                       "NombreRecibe": recibe,
                       "YYYYMMDD": yyyyMMdd,
-                      "YYYYMMDDHHMMSS": yyyyMMddHHmmss,                     
-                      "idDriver": globalUserId ?? "", 
+                      "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
+                      "idDriver": globalUserId ?? "",
                       "data": dataPayload,
                     };
 
                     try {
                       const webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
-
 
                       final response = await http.post(
                         Uri.parse(webhookUrl),

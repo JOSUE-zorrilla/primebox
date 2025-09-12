@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data'; // NUEVO: para Uint8List (preview y subida)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -15,6 +16,8 @@ import 'login_page.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'fallidas_multientrega_page.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_image_compress/flutter_image_compress.dart'; // NUEVO
 
 class EntregaFallidaPage extends StatefulWidget {
   final String telefono;
@@ -40,6 +43,9 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   final TextEditingController _notaController = TextEditingController();
   final List<File?> _imagenes = [null];
   String? _urlImagen;
+
+  // NUEVO: bytes JPEG comprimidos para mostrar preview real (lo que subimos)
+  Uint8List? _previewJpeg;
 
   // Multi-entrega (idPB adicionales que vienen de MultiEntrega)
   List<String> _guiasFallidas = [];
@@ -135,6 +141,22 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
     }
   }
 
+  // NUEVO: helper de compresión (JPEG, lado largo máx. 1600px, calidad 75)
+  Future<Uint8List> _compressImage(File file) async {
+    final originalBytes = await file.readAsBytes();
+    final result = await FlutterImageCompress.compressWithList(
+      originalBytes,
+      minWidth: 1600,
+      minHeight: 1600,
+      quality: 75,           // 60–85 suele estar bien
+      rotate: 0,
+      keepExif: true,
+      format: CompressFormat.jpeg,
+    );
+    return Uint8List.fromList(result);
+  }
+
+  // Subida con compresión y metadata correcta
   Future<void> _subirImagenAFirebase(File image) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
@@ -145,17 +167,27 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       ),
     );
     try {
-      final fileName = path.basename(image.path);
+      // === COMPRESIÓN ===
+      final Uint8List compressed = await _compressImage(image);
+
+      // Nombre legible (y forzamos extensión .jpg)
+      final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
       final ref = FirebaseStorage.instance
           .ref()
           .child('imagenesfallidas')
-          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName');
+          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
 
-      await ref.putFile(image);
+      // Subimos bytes comprimidos con contentType correcto
+      await ref.putData(
+        compressed,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+
       final url = await ref.getDownloadURL();
 
       setState(() {
-        _imagenes[0] = image;
+        _imagenes[0] = image; // mantenemos referencia al File (por si la necesitas)
+        _previewJpeg = compressed; // mostramos preview comprimido
         _urlImagen = url;
       });
 
@@ -187,19 +219,70 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   }
 
   void _enviarWhatsApp() async {
-    final mensaje = 'Hola...';
-    final telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
-    if (!RegExp(r'^\d{7,}$').hasMatch(telefonoWa)) {
-      _snack('Número de WhatsApp inválido');
-      return;
-    }
-    final uri = Uri.parse(
-      'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
-    );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      _snack('No se pudo abrir WhatsApp');
+    final String mensaje = 'Hola...';
+    final String telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+
+    try {
+      // 1) Validación de número (solo dígitos, 7–15)
+      if (!RegExp(r'^\d{7,15}$').hasMatch(telefonoWa)) {
+        throw 'Número inválido. Debe tener solo dígitos (7–15). Recibido: "$telefonoWa".';
+      }
+
+      // 2) URIs
+      final Uri uriWaMe = Uri.parse(
+        'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
+      );
+      final Uri uriNative = Uri.parse(
+        'whatsapp://send?phone=$telefonoWa&text=${Uri.encodeComponent(mensaje)}',
+      );
+
+      // 3) WEB: solo podemos abrir wa.me
+      if (kIsWeb) {
+        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
+        if (!ok) {
+          throw 'No se pudo abrir el enlace wa.me en el navegador.';
+        }
+        return;
+      }
+
+      // 4) NATIVO: intentar app primero
+      bool intentadoNativo = false;
+      try {
+        final puedeNativo = await canLaunchUrl(uriNative);
+        if (puedeNativo) {
+          intentadoNativo = true;
+          final ok = await launchUrl(uriNative, mode: LaunchMode.externalApplication);
+          if (!ok) {
+            throw 'La app de WhatsApp no respondió al intento de apertura.';
+          }
+          return; // Listo
+        }
+      } catch (e) {
+        throw 'Error al invocar la app de WhatsApp: $e';
+      }
+
+      // 5) Fallback a wa.me
+      final puedeWeb = await canLaunchUrl(uriWaMe);
+      if (puedeWeb) {
+        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
+        if (!ok) {
+          throw 'No se pudo abrir el enlace wa.me en el navegador.';
+        }
+        return;
+      }
+
+      // 6) Explicación si nada funcionó
+      String razon = 'No fue posible abrir WhatsApp ni el enlace web. ';
+      if (!intentadoNativo) {
+        razon += 'Posible causa: WhatsApp no está instalado o el sistema bloqueó la intención.';
+      } else {
+        razon += 'Posible causa: el sistema bloqueó la apertura o no hay navegador disponible.';
+      }
+      throw razon;
+    } on FormatException catch (e) {
+      _snack('Número/URI con formato inválido: $e');
+    } catch (e) {
+      _snack('No se pudo abrir WhatsApp: $e');
     }
   }
 
@@ -210,7 +293,13 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       return;
     }
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.camera);
+    // TIP: puedes limitar desde aquí también, pero igual comprimimos después
+    final picked = await picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 85, // ligera compresión inicial para ahorrar RAM
+    );
     if (picked != null) {
       await _subirImagenAFirebase(File(picked.path));
     }
@@ -223,7 +312,12 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       return;
     }
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2000,   // un poco mayor para fotos ya existentes
+      maxHeight: 2000,
+      imageQuality: 90, // compresión leve inicial
+    );
     if (picked != null) {
       await _subirImagenAFirebase(File(picked.path));
     }
@@ -505,7 +599,18 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                         ),
                       ],
                     ),
-                    if (_imagenes[0] != null) ...[
+                    if (_previewJpeg != null) ...[
+                      const SizedBox(height: 12),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.memory(
+                          _previewJpeg!,
+                          height: 150,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ] else if (_imagenes[0] != null) ...[
                       const SizedBox(height: 12),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
