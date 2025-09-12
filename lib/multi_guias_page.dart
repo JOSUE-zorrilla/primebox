@@ -5,11 +5,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 
 class MultiGuiasPage extends StatefulWidget {
-  const MultiGuiasPage({super.key});
+  final List<String>? initialGuias; // 👈 nuevo
+
+  const MultiGuiasPage({super.key, this.initialGuias});
 
   @override
   State<MultiGuiasPage> createState() => _MultiGuiasPageState();
 }
+
 
 class _MultiGuiasPageState extends State<MultiGuiasPage> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
@@ -19,21 +22,34 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
   bool _permissionGranted = false;
 
   @override
-  void initState() {
-    super.initState();
-    _checkCameraPermission();
+void initState() {
+  super.initState();
+  _checkCameraPermission();
+}
+
+/// Modifica tu _checkCameraPermission para cargar initialGuias cuando termine
+Future<void> _checkCameraPermission() async {
+  var status = await Permission.camera.status;
+  if (!status.isGranted) {
+    status = await Permission.camera.request();
   }
 
-  Future<void> _checkCameraPermission() async {
-    var status = await Permission.camera.status;
-    if (!status.isGranted) {
-      status = await Permission.camera.request();
+  setState(() {
+    _permissionGranted = status.isGranted;
+  });
+
+  // 👇 Precarga las guías iniciales (si las hay)
+  if (widget.initialGuias != null && widget.initialGuias!.isNotEmpty) {
+    for (final raw in widget.initialGuias!) {
+      final id = raw.trim();
+      if (id.isEmpty) continue;
+      // Usa el mismo flujo de validación para consistencia
+      // (si prefieres “forzar” sin validar, puedes hacer guias.add(id) directo)
+      _validarYAgregarGuia(id);
     }
-
-    setState(() {
-      _permissionGranted = status.isGranted;
-    });
   }
+}
+
 
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;

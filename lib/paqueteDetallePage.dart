@@ -74,6 +74,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     super.initState();
     _obtenerUbicacion();
     _obtenerIdEmpresa();
+    final idBase = Uri.decodeFull(widget.id).trim();
+    _guiasMulti = [idBase];
   }
 
   // ---------------- LÓGICA ----------------
@@ -528,21 +530,29 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () async {
-              final resultado = await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const MultiGuiasPage()),
-              );
-              if (resultado != null && resultado is List<String>) {
-                setState(() => _guiasMulti = resultado);
-              }
-            },
-            child: Text(
-              'MultiGuía',
-              style: TextStyle(color: brand, fontWeight: FontWeight.w600),
-            ),
-          )
+    TextButton(
+  onPressed: () async {
+    final idBase = Uri.decodeFull(widget.id).trim();
+
+    final resultado = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MultiGuiasPage(
+          initialGuias: {idBase, ..._guiasMulti}.toList(), // 👈 ya marcadas
+        ),
+      ),
+    );
+
+    if (resultado != null && resultado is List<String>) {
+      final idBase2 = Uri.decodeFull(widget.id).trim();
+      setState(() {
+        _guiasMulti = {idBase2, ...resultado}.toList(); // aseguras id base y evitas duplicados
+      });
+    }
+  },
+  child: Text('MultiGuía', style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
+)
+
         ],
       ),
       body: Center(
