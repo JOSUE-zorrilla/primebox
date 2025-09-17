@@ -8,8 +8,8 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:webview_flutter/webview_flutter.dart';
 import 'recolectados_centros_page.dart';
-
 
 // Importa las variables globales definidas en login_page.dart
 import 'login_page.dart' show globalNombre, globalUserId, globalIdCiudad;
@@ -55,12 +55,16 @@ class RecolectarRecoleccionPage extends StatefulWidget {
   final String direccionCentro;
   final String iconUrl;
 
+  /// Timestamp en milisegundos que viene de la pantalla anterior (Embarque)
+  final int embarqueMs;
+
   const RecolectarRecoleccionPage({
     super.key,
     required this.idTienda,
     required this.nombreCentro,
     required this.direccionCentro,
     required this.iconUrl,
+    required this.embarqueMs,
   });
 
   @override
@@ -90,6 +94,10 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   double? _lat;
   double? _lng;
 
+  // ====== Firma en tiempo real ======
+  StreamSubscription<DatabaseEvent>? _firmaSub;
+  bool _firmadoEnviado = false;
+
   static const String _urlWebhook =
       'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_1Cw2TxVBj45xu2nA1EdBgq';
 
@@ -105,6 +113,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   void dispose() {
     _buscarCtrl.dispose();
     _qrController?.dispose();
+    _firmaSub?.cancel();
     super.dispose();
   }
 
@@ -273,9 +282,6 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
         _locLoading = false;
         _locError = null;
       });
-
-      // Logs de depuración (opcional)
-      // debugPrint('GPS => lat=$_lat, lng=$_lng');
     } catch (e) {
       setState(() {
         _locError = e.toString();
@@ -284,7 +290,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     }
   }
 
-  // ====== Helpers de fecha requeridos por el webhook ======
+  // ====== Helpers de fecha requeridos ======
   String _two(int n) => n.toString().padLeft(2, '0');
 
   /// Convierte un timestamp en milisegundos a "YYYY-MM-DD"
@@ -356,7 +362,100 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     });
   }
 
-  // ====== FINALIZAR: Usa la lat/lng precargada ======
+  // ====== Construcción y envío al Webhook ======
+  Future<void> _postWebhook({String? urlFirma}) async {
+    if (_seleccionados.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Debes escanear al menos 1 paquete.')),
+      );
+      return;
+    }
+    if (_lat == null || _lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Ubicación no disponible. Actualiza el GPS.')),
+      );
+      return;
+    }
+
+    try {
+      final fechaMs = DateTime.now().millisecondsSinceEpoch;
+      final yyyyMMdd = _fmtYYYYMMDD(fechaMs);
+      final yyyyMMddHHmmss = _fmtYYYYMMDDHHMMSS(fechaMs);
+
+      final Map<String, dynamic> dataRecolectados = {};
+      for (final p in _seleccionados) {
+        final key = (p.idGuiaPB.isNotEmpty
+                ? p.idGuiaPB
+                : (p.tnReference.isNotEmpty ? p.tnReference : p.idGuiaProveedor))
+            .toString();
+        dataRecolectados[key] = {
+          'idGuia': p.idGuiaPB,
+          'idGuiaProveedor': p.idGuiaProveedor,
+          'tnReference': p.tnReference,
+        };
+      }
+
+      final payload = {
+        'FechaTimestamp': fechaMs,
+        'YYYYMMDD': yyyyMMdd,
+        'YYYYMMDDHHMMSS': yyyyMMddHHmmss,
+        'Latitude': _lat,
+        'Longitude': _lng,
+        'NombreCentro': widget.nombreCentro,
+        'dataRecolectados': dataRecolectados,
+        'idCentroRecoleccion': widget.idTienda,
+        'NombreDriver': globalNombre ?? '',
+        'idDriver': globalUserId ?? '',
+        'idCiudad': globalIdCiudad ?? '',
+        'Embarque': widget.embarqueMs,
+        if (urlFirma != null && urlFirma.trim().isNotEmpty)
+          'UrlFirma': urlFirma.trim(),
+      };
+
+      final resp = await http.post(
+        Uri.parse(_urlWebhook),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (!mounted) return;
+
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Información enviada')),
+        );
+
+        setState(() {
+          _seleccionados = [];
+          _codesProcesados.clear();
+        });
+
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const RecolectadosCentrosPage(),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error al enviar (${resp.statusCode}). ${resp.body.isNotEmpty ? resp.body : ''}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    }
+  }
+
+  // ====== FINALIZAR (manual) ======
   Future<void> _finalizarRecoleccion() async {
     if (_seleccionados.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -395,91 +494,103 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
 
     if (confirmar != true) return;
 
-    try {
-      final fechaMs = DateTime.now().millisecondsSinceEpoch;
+    await _postWebhook();
+  }
 
-      // NUEVO: formateos requeridos por el webhook
-      final yyyyMMdd = _fmtYYYYMMDD(fechaMs);              // "YYYY-MM-DD"
-      final yyyyMMddHHmmss = _fmtYYYYMMDDHHMMSS(fechaMs);  // "YYYY-MM-DD HH:MM:SS"
-      // Si lo quieres en UTC, usa:
-      // final yyyyMMdd = _fmtYYYYMMDD(fechaMs, useUtc: true);
-      // final yyyyMMddHHmmss = _fmtYYYYMMDDHHMMSS(fechaMs, useUtc: true);
+  // ====== Listener de firma y Bottom Sheet con WebView ======
+  Future<void> _abrirCerrarConFirma() async {
+    final hoyYYYYMMDD = _fmtYYYYMMDD(DateTime.now().millisecondsSinceEpoch);
 
-      // Objeto de ids escaneados (clave = id preferente)
-      final Map<String, dynamic> dataRecolectados = {};
-      for (final p in _seleccionados) {
-        final key = (p.idGuiaPB.isNotEmpty
-                ? p.idGuiaPB
-                : (p.tnReference.isNotEmpty ? p.tnReference : p.idGuiaProveedor))
-            .toString();
-        dataRecolectados[key] = {
-          'idGuia': p.idGuiaPB,
-          'idGuiaProveedor': p.idGuiaProveedor,
-          'tnReference': p.tnReference,
-        };
+    // Ruta RTDB a escuchar:
+    final firmaRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/FirmasProveedor/$hoyYYYYMMDD/Embarque/${widget.embarqueMs}',
+    );
+
+    // Reset y escucha
+    _firmaSub?.cancel();
+    _firmadoEnviado = false;
+    _firmaSub = firmaRef.onValue.listen((event) async {
+      final val = event.snapshot.value;
+      String? urlFirma;
+
+      if (val is Map) {
+        final m = Map<String, dynamic>.from(val as Map);
+        final dynamic candidate = m['Url'] ?? m['url'] ?? m['URL'];
+        if (candidate != null) urlFirma = candidate.toString();
+      } else if (val is String) {
+        // por si el nodo es directamente la URL
+        urlFirma = val;
       }
 
-      final payload = {
-        'FechaTimestamp': fechaMs,
-        'YYYYMMDD': yyyyMMdd,                 // agregado
-        'YYYYMMDDHHMMSS': yyyyMMddHHmmss,     // agregado
-        'Latitude': _lat,
-        'Longitude': _lng,
-        'NombreCentro': widget.nombreCentro, // se mantiene tal cual estaba
-        'dataRecolectados': dataRecolectados,
-        'idCentroRecoleccion': widget.idTienda,
+      if (urlFirma != null &&
+          urlFirma.trim().isNotEmpty &&
+          !_firmadoEnviado) {
+        _firmadoEnviado = true;
 
-        // ===== Campos adicionales solicitados =====
-        'NombreDriver': globalNombre ?? '',
-        'idDriver': globalUserId ?? '',
-        'idCiudad': globalIdCiudad ?? '',
-      };
+        // cerrar el sheet si está abierto
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop(); // cierra el bottom sheet
+        }
 
-      final resp = await http.post(
-        Uri.parse(_urlWebhook),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      );
+        // Enviar al webhook con UrlFirma
+        await _postWebhook(urlFirma: urlFirma);
+      }
+    });
 
-      if (!mounted) return;
+    // Abrir el WebView en un bottom sheet
+    final urlWeb =
+        'https://primebox.mx/dashboard/app/Views/view_firma_embarque?idEmbarque=${widget.embarqueMs}&idFecha=$hoyYYYYMMDD';
 
-     if (resp.statusCode >= 200 && resp.statusCode < 300) {
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Información enviada')),
-  );
-
-  // Limpia selección local
-  setState(() {
-    _seleccionados = [];
-    _codesProcesados.clear();
-  });
-
-  // >>> NUEVO: continuar a la siguiente pantalla (lista por centro)
-  await Future.delayed(const Duration(milliseconds: 400));
-  if (!mounted) return;
-  Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => const RecolectadosCentrosPage(),
-    ),
-  );
-} else {
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(
-        'Error al enviar (${resp.statusCode}). ${resp.body.isNotEmpty ? resp.body : ''}',
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: false,        // para permitir dibujar en el canvas de firma
+      isDismissible: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-    ),
-  );
-}
+      builder: (ctx) {
+        final ctrl = WebViewController()
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..loadRequest(Uri.parse(urlWeb));
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.95,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Cerrar con firma',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close),
+                      )
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(child: WebViewWidget(controller: ctrl)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
 
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
-    }
+    // Al cerrar el sheet, cancelar la suscripción
+    _firmaSub?.cancel();
+    _firmaSub = null;
   }
 
   // ======== UI ========
@@ -718,7 +829,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
                       ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 110),
                       itemCount: _seleccionados.length,
                       itemBuilder: (_, i) {
                         final p = _seleccionados[i];
@@ -753,29 +864,56 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
         ),
       ),
 
-      // ===== Botón inferior Finalizar =====
+      // ===== Botones inferiores =====
       bottomSheet: SafeArea(
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          color: const Color(0xFF2B59F2),
-          child: ElevatedButton(
-            onPressed: _seleccionados.isEmpty ? null : _finalizarRecoleccion,
-            style: ElevatedButton.styleFrom(
-              foregroundColor: Colors.white,
-              backgroundColor: _seleccionados.isEmpty
-                  ? Colors.black26
-                  : const Color(0xFF2B59F2),
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          color: const Color(0xFFF2F3F7),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _abrirCerrarConFirma,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: const BorderSide(color: Color(0xFF2B59F2)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Cerrar con firma',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF2B59F2),
+                    ),
+                  ),
+                ),
               ),
-            ),
-            child: const Text(
-              'Finalizar',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _seleccionados.isEmpty ? null : _finalizarRecoleccion,
+                  style: ElevatedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: _seleccionados.isEmpty
+                        ? Colors.black26
+                        : const Color(0xFF2B59F2),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Finalizar',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

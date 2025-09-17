@@ -275,9 +275,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                             return _CentroCard(
                               iconUrl: c.iconUrl,
                               nombre: c.nombre.isEmpty ? 'ID ${c.idTienda}' : c.nombre,
-                              direccion: c.direccion.isEmpty
-                                  ? '—'
-                                  : c.direccion,
+                              direccion: c.direccion.isEmpty ? '—' : c.direccion,
                               onTap: () {
                                 if (c.idTienda.trim().isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -287,8 +285,11 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                                   );
                                   return;
                                 }
-                                // Aquí enviamos EXACTAMENTE la clave (p.ej. L0003175562114040030PB)
-                                // hacia la siguiente pantalla.
+
+                                // Generar el timestamp de Embarque y enviarlo a la siguiente pantalla
+                                final embarqueMs =
+                                    DateTime.now().millisecondsSinceEpoch;
+
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
                                     builder: (_) => RecolectarRecoleccionPage(
@@ -296,6 +297,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                                       nombreCentro: c.nombre,
                                       direccionCentro: c.direccion,
                                       iconUrl: c.iconUrl,
+                                      embarqueMs: embarqueMs, // ← NUEVO
                                     ),
                                   ),
                                 );
