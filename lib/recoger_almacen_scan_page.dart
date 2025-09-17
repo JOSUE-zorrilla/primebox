@@ -1,19 +1,27 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:http/http.dart' as http;
+import 'package:webview_flutter/webview_flutter.dart';
+
+// Globals
+import 'login_page.dart' show globalNombre, globalUserId, globalIdCiudad;
 
 class RecogerAlmacenScanPage extends StatefulWidget {
   final String idAlmacen;
   final String nombreAlmacen;
   final String direccionAlmacen;
+  final String idFirma; // viene de la pantalla anterior
 
   const RecogerAlmacenScanPage({
     super.key,
     required this.idAlmacen,
     required this.nombreAlmacen,
     required this.direccionAlmacen,
+    required this.idFirma,
   });
 
   @override
@@ -33,6 +41,13 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
   // Buscador manual
   final TextEditingController _buscarCtrl = TextEditingController();
 
+  // Firma realtime
+  StreamSubscription<DatabaseEvent>? _firmaSub;
+  bool _enviando = false;
+
+  static const String _webhookUrl =
+      'https://editor.apphive.io/hook/ccp_fsV5EnyprpgEzVVJq62Cbf';
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +58,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
   void dispose() {
     _qrController?.dispose();
     _buscarCtrl.dispose();
+    _firmaSub?.cancel();
     super.dispose();
   }
 
@@ -72,7 +88,6 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
     final code = _norm(rawCode);
     if (code.isEmpty) return;
 
-    // evita “rebote” del lector
     if (_codesProcesados.contains(code)) return;
     _codesProcesados.add(code);
 
@@ -83,8 +98,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       final snap = await ref.get();
 
       if (snap.exists) {
-        final yaEsta = _seleccionados.contains(code);
-        if (yaEsta) {
+        if (_seleccionados.contains(code)) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Este paquete ya fue añadido.')),
           );
@@ -121,6 +135,204 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
     setState(() {
       _seleccionados.remove(code);
     });
+  }
+
+  // ====== formatos de fecha ======
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  String _fmtYYYYMMDD(DateTime dt) {
+    return '${dt.year}-${_two(dt.month)}-${_two(dt.day)}';
+    // YYYY-MM-DD
+  }
+
+  String _fmtYYYYMMDDHHMMSS(DateTime dt) {
+    return '${dt.year}-${_two(dt.month)}-${_two(dt.day)} ${_two(dt.hour)}:${_two(dt.minute)}:${_two(dt.second)}';
+    // YYYY-MM-DD HH:mm:ss
+  }
+
+  // ====== construir payload y enviar webhook ======
+  Future<void> _enviarWebhook({String? urlFirma}) async {
+    if (_seleccionados.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Debes escanear al menos 1 paquete.')),
+      );
+      return;
+    }
+    if (_enviando) return;
+
+    setState(() => _enviando = true);
+
+    try {
+      final now = DateTime.now();
+      final ts = now.millisecondsSinceEpoch;
+      final ymd = _fmtYYYYMMDD(now);
+      final ymdhms = _fmtYYYYMMDDHHMMSS(now);
+
+      // data = { "CODIGO": {"idGuia": "CODIGO"}, ... }
+      final Map<String, dynamic> data = {};
+      for (final code in _seleccionados) {
+        data[code] = {'idGuia': code};
+      }
+
+      final payload = {
+        'NombreUsuario': (globalNombre ?? '').toString(),
+        'Timestamp': ts,
+        'YYYYMMDD': ymd,
+        'YYYYDDHHMMSS': ymdhms, // según tu requerimiento exacto
+        'idAlmacen': widget.idAlmacen,
+        'idCiudad': (globalIdCiudad ?? '').toString(),
+        'idUsuario': (globalUserId ?? '').toString(),
+        'data': data,
+        if (urlFirma != null && urlFirma.trim().isNotEmpty) 'UrlFirma': urlFirma,
+      };
+
+      final resp = await http.post(
+        Uri.parse(_webhookUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (!mounted) return;
+
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Información enviada.')),
+        );
+        // Regresar una pantalla
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al enviar (${resp.statusCode}). ${resp.body}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
+  // ====== Finalizar ======
+  Future<void> _onFinalizar() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar'),
+        content: const Text('¿Desea finalizar la recolección de los paquetes?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sí')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _enviarWebhook();
+    }
+  }
+
+  // ====== Con Firma (BottomSheet + WebView + escucha RTDB) ======
+  Future<void> _onConFirma() async {
+    final idFirma = (widget.idFirma).trim();
+    if (idFirma.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay idFirma configurado para este almacén.')),
+      );
+      return;
+    }
+
+    final hoy = _fmtYYYYMMDD(DateTime.now());
+    final firmaPath =
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/FirmasDriversAlmacen/$hoy/Firmas/$idFirma';
+
+    // Suscripción antes de abrir el sheet
+    _firmaSub?.cancel();
+    _firmaSub = FirebaseDatabase.instance.ref(firmaPath).onValue.listen(
+      (event) async {
+        String? urlFirma;
+        final val = event.snapshot.value;
+
+        if (val is Map) {
+          final m = Map<String, dynamic>.from(val as Map);
+          final dynamic candidate = m['UrlFirma'] ?? m['urlFirma'] ?? m['url'];
+          if (candidate != null) urlFirma = candidate.toString();
+        } else if (val is String) {
+          urlFirma = val;
+        }
+
+        if (urlFirma != null && urlFirma!.trim().isNotEmpty) {
+          // Cerrar el sheet si está abierto
+          if (mounted && Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+          _firmaSub?.cancel();
+          _firmaSub = null;
+
+          // Enviar con UrlFirma
+          await _enviarWebhook(urlFirma: urlFirma);
+        }
+      },
+      onError: (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error escuchando firma: $e')),
+        );
+      },
+    );
+
+    final urlWeb =
+        'https://primebox.mx/dashboard/app/Views/view_firma_driver?id=$idFirma&Fecha=$hoy';
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: false,
+      isDismissible: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final ctrl = WebViewController()
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..loadRequest(Uri.parse(urlWeb));
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.95,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Firma Digital',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close),
+                      )
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(child: WebViewWidget(controller: ctrl)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    // Al cerrar manualmente el sheet
+    _firmaSub?.cancel();
+    _firmaSub = null;
   }
 
   // ===== UI =====
@@ -337,32 +549,56 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         ),
       ),
 
-      // Botón inferior (estético, puedes conectar a firma si lo necesitas)
+      // ===== Botones inferiores =====
       bottomSheet: SafeArea(
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           color: const Color(0xFFF2F3F7),
-          child: ElevatedButton(
-            onPressed: () {
-              // Aquí puedes abrir un flujo de "Firma Digital" si lo deseas
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Acción de firma pendiente de integrar.')),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2B59F2),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _onConFirma,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: const BorderSide(color: Color(0xFF2B59F2)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Con Firma',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF2B59F2),
+                    ),
+                  ),
+                ),
               ),
-            ),
-            child: const Text(
-              'Firma Digital',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _seleccionados.isEmpty || _enviando ? null : _onFinalizar,
+                  style: ElevatedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: _seleccionados.isEmpty
+                        ? Colors.black26
+                        : const Color(0xFF2B59F2),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Finalizar',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

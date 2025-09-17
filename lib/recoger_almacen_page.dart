@@ -5,7 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 // Usa la global como en tus otras pantallas
 import 'login_page.dart' show globalIdCiudad;
 
-// NUEVO: pantalla con escáner
+// Pantalla con escáner
 import 'recoger_almacen_scan_page.dart';
 
 class RecogerAlmacenPage extends StatefulWidget {
@@ -45,6 +45,7 @@ class _RecogerAlmacenPageState extends State<RecogerAlmacenPage> {
                 'id': key.toString(),
                 'NombreAlmacen': raw['NombreAlmacen']?.toString() ?? 'Sin nombre',
                 'Direccion': raw['Direccion']?.toString() ?? 'Sin dirección',
+                // OJO: ya NO leemos idFirma de la tabla
               });
             }
           }
@@ -68,9 +69,9 @@ class _RecogerAlmacenPageState extends State<RecogerAlmacenPage> {
   @override
   Widget build(BuildContext context) {
     const overlay = SystemUiOverlayStyle(
-      statusBarColor: Colors.white,             // status bar blanco
-      statusBarIconBrightness: Brightness.dark, // íconos negros (Android)
-      statusBarBrightness: Brightness.light,    // correcto en iOS
+      statusBarColor: Colors.white,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
     );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -118,7 +119,12 @@ class _RecogerAlmacenPageState extends State<RecogerAlmacenPage> {
                                   nombre: a['NombreAlmacen'],
                                   direccion: a['Direccion'],
                                   onTap: () {
-                                    // >>> Navega a la pantalla con escáner, pasando datos del almacén
+                                    // Generar idFirma como timestamp (ms)
+                                    final idFirma = DateTime
+                                            .now()
+                                            .millisecondsSinceEpoch
+                                            .toString();
+
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -126,6 +132,7 @@ class _RecogerAlmacenPageState extends State<RecogerAlmacenPage> {
                                           idAlmacen: a['id'],
                                           nombreAlmacen: a['NombreAlmacen'],
                                           direccionAlmacen: a['Direccion'],
+                                          idFirma: idFirma, // << pasamos el timestamp
                                         ),
                                       ),
                                     );
