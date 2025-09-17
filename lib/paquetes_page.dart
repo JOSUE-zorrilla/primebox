@@ -15,6 +15,11 @@ import 'entrega_fallida_page.dart';
 import 'login_page.dart'; // para globalNombre / globalUserId si los tienes
 import 'package:shared_preferences/shared_preferences.dart';
 import 'recolectar_tiendas_page.dart';
+import 'recoger_almacen_page.dart';  // <-- FALTA ESTE
+
+
+
+
 
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
@@ -69,6 +74,17 @@ class _PaquetesPageState extends State<PaquetesPage> {
       MaterialPageRoute(builder: (_) => const RecolectarTiendasPage()),
     );
   }
+
+  void _irARecogerEnAlmacen() {
+  // Debe estar DESconectado
+  if (!_requerirDesconexion()) return;
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const RecogerAlmacenPage()),
+  );
+}
+
 
   // =============== Utilidades de tiempo ===============
   String _fmt(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
@@ -523,65 +539,46 @@ class _PaquetesPageState extends State<PaquetesPage> {
             header,
             Expanded(
               child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  item(
-                    icon: Icons.notifications_none_rounded,
-                    text: 'Notificaciones',
-                    onTap: () => _proximamente('Notificaciones'),
-                  ),
-                  item(
-                    icon: Icons.store_mall_directory_outlined,
-                    text: 'Recolectar en tienda',
-                    onTap: _irARecolectarTiendas,   // ahora exige estar DESconectado
-                  ),
-                  item(
-                    icon: Icons.route_outlined,
-                    text: 'Rutas disponibles',
-                    onTap: () => _proximamente('Rutas disponibles'),
-                  ),
-                  item(
-                    icon: Icons.group_add_outlined,
-                    text: 'Delegar paquete',
-                    onTap: () => _proximamente('Delegar paquete'),
-                  ),
-                  item(
-                    icon: Icons.history_rounded,
-                    text: 'Historial de paquetes',
-                    onTap: () => _proximamente('Historial de paquetes'),
-                  ),
-                  item(
-                    icon: Icons.backup_outlined,
-                    text: 'Evidencia de respaldo',
-                    onTap: () => _proximamente('Evidencia de respaldo'),
-                  ),
-                  item(
-                    icon: Icons.inventory_2_outlined,
-                    text: 'Paquetes recolectados',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
-                      );
-                    },
-                  ),
-                  item(
-                    icon: Icons.local_shipping_outlined,
-                    text: 'Recoger paquete en almacén',
-                    onTap: () => _proximamente('Recoger paquete en almacén'),
-                  ),
-                  item(
-                    icon: Icons.assignment_return_outlined,
-                    text: 'Devoluciones',
-                    onTap: () => _proximamente('Devoluciones'),
-                  ),
-                  item(
-                    icon: Icons.support_agent_outlined,
-                    text: 'Levantar Ticket',
-                    onTap: () => _proximamente('Levantar Ticket'),
-                  ),
-                ],
-              ),
+  padding: EdgeInsets.zero,
+  children: [
+    item(
+      icon: Icons.store_mall_directory_outlined,
+      text: 'Recolectar en tienda',
+      onTap: _irARecolectarTiendas, // exige estar DESconectado
+    ),
+    item(
+      icon: Icons.route_outlined,
+      text: 'Rutas disponibles',
+      onTap: () => _proximamente('Rutas disponibles'),
+    ),
+    item(
+      icon: Icons.group_add_outlined,
+      text: 'Delegar paquete',
+      onTap: () => _proximamente('Delegar paquete'),
+    ),
+    item(
+      icon: Icons.inventory_2_outlined,
+      text: 'Paquetes recolectados',
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
+        );
+      },
+    ),
+    item(
+      icon: Icons.local_shipping_outlined,
+      text: 'Recoger paquete en almacén',
+      onTap: _irARecogerEnAlmacen, // << ahora exige estar DESconectado
+    ),
+    item(
+      icon: Icons.assignment_return_outlined,
+      text: 'Devoluciones',
+      onTap: () => _proximamente('Devoluciones'),
+    ),
+  ],
+),
+
             ),
             const Divider(height: 1),
             ListTile(

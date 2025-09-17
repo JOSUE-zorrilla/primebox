@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import 'centro_boot_page.dart';
 
+
 // ✅ Variables globales
 String? globalUserId;
 String? globalNombre;
