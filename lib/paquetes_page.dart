@@ -453,38 +453,44 @@ class _PaquetesPageState extends State<PaquetesPage> {
         (globalNombre?.trim().isNotEmpty ?? false) ? globalNombre! : (user?.displayName ?? 'Usuario');
     final foto = user?.photoURL;
 
-    Widget header = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundImage: (foto != null && foto.isNotEmpty) ? NetworkImage(foto) : null,
-            child: (foto == null || foto.isEmpty)
-                ? const Icon(Icons.person, color: Colors.white)
-                : null,
-            backgroundColor: const Color(0xFF2A6AE8),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Perfil', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                Text(
-                  nombre,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                ),
-                const SizedBox(height: 6),
-                Container(height: 1, color: Colors.black12),
-              ],
-            ),
-          )
-        ],
-      ),
+// (dentro de _buildDrawer)
+Widget header = InkWell(
+  onTap: () async {
+    Navigator.pop(context); // cerrar el drawer
+    // Ir a la pantalla de perfil
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const PerfilPage()),
     );
+  },
+  child: Padding(
+    padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+    child: Row(
+      children: [
+        CircleAvatar(
+          radius: 24,
+          backgroundImage: (foto != null && foto.isNotEmpty) ? NetworkImage(foto) : null,
+          child: (foto == null || foto.isEmpty)
+              ? const Icon(Icons.person, color: Colors.white)
+              : null,
+          backgroundColor: const Color(0xFF2A6AE8),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text('Perfil', style: TextStyle(fontSize: 12, color: Colors.black54)),
+              SizedBox(height: 2),
+              // El nombre ya lo pones abajo dinámico (lo mantenemos igual)
+            ],
+          ),
+        ),
+      ],
+    ),
+  ),
+);
+
 
     ListTile item({
       required IconData icon,
