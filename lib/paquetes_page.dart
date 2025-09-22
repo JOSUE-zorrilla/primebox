@@ -53,20 +53,50 @@ class _PaquetesPageState extends State<PaquetesPage> {
   StreamSubscription<DatabaseEvent>? _paquetesSub;
   DatabaseReference? _paquetesRef;
 
+  // ===== NUEVO: datos del conductor para el Drawer (foto/nombre desde RTDB)
+  String _driverNombre = '';
+  String _driverFoto = '';
+  DatabaseReference? _conductorRef;
+  StreamSubscription<DatabaseEvent>? _conductorSub;
+
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_filtrarPaquetes);
     _escucharEstadoConexion();
     _suscribirsePaquetes();
+    _escucharPerfilConductor(); // <-- NUEVO
   }
 
   @override
   void dispose() {
     _estadoConexionSub?.cancel();
     _paquetesSub?.cancel();
+    _conductorSub?.cancel(); // <-- NUEVO
     _searchController.dispose();
     super.dispose();
+  }
+
+  // ===== NUEVO: escucha cambios de Nombre/Foto en RTDB
+  void _escucharPerfilConductor() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    _conductorRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${user.uid}',
+    );
+
+    _conductorSub = _conductorRef!.onValue.listen((event) {
+      final snap = event.snapshot;
+      final nombre = snap.child('Nombre').value?.toString() ?? '';
+      final foto = snap.child('Foto').value?.toString() ?? '';
+      if (mounted) {
+        setState(() {
+          _driverNombre = nombre;
+          _driverFoto = foto;
+        });
+      }
+    });
   }
 
   void _irARecolectarTiendas() {
@@ -400,6 +430,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
     await FirebaseAuth.instance.signOut();
     await _paquetesSub?.cancel();
     await _estadoConexionSub?.cancel();
+    await _conductorSub?.cancel();
     if (mounted) Navigator.pushReplacementNamed(context, '/login');
   }
 
@@ -449,48 +480,58 @@ class _PaquetesPageState extends State<PaquetesPage> {
   // ======== Drawer ========
   Drawer _buildDrawer(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final nombre =
+    final nombreFallback =
         (globalNombre?.trim().isNotEmpty ?? false) ? globalNombre! : (user?.displayName ?? 'Usuario');
-    final foto = user?.photoURL;
+    final fotoAuth = user?.photoURL ?? '';
 
-// (dentro de _buildDrawer)
-Widget header = InkWell(
-  onTap: () async {
-    Navigator.pop(context); // cerrar el drawer
-    // Ir a la pantalla de perfil
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const PerfilPage()),
+    // ===== Header del Drawer con Foto y Nombre desde RTDB (fallback a Auth) =====
+    Widget header = InkWell(
+      onTap: () async {
+        Navigator.pop(context); // cerrar el drawer
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const PerfilPage()),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundImage: ((_driverFoto.trim().isNotEmpty
+                          ? _driverFoto.trim()
+                          : fotoAuth)
+                      .isNotEmpty)
+                  ? NetworkImage(_driverFoto.trim().isNotEmpty ? _driverFoto.trim() : fotoAuth)
+                  : null,
+              child: ((_driverFoto.trim().isNotEmpty ? _driverFoto.trim() : fotoAuth).isEmpty)
+                  ? const Icon(Icons.person, color: Colors.white)
+                  : null,
+              backgroundColor: const Color(0xFF2A6AE8),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Perfil', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                  const SizedBox(height: 2),
+                  Text(
+                    _driverNombre.trim().isNotEmpty ? _driverNombre.trim() : nombreFallback,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(height: 1, color: Colors.black12),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-  },
-  child: Padding(
-    padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
-    child: Row(
-      children: [
-        CircleAvatar(
-          radius: 24,
-          backgroundImage: (foto != null && foto.isNotEmpty) ? NetworkImage(foto) : null,
-          child: (foto == null || foto.isEmpty)
-              ? const Icon(Icons.person, color: Colors.white)
-              : null,
-          backgroundColor: const Color(0xFF2A6AE8),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Text('Perfil', style: TextStyle(fontSize: 12, color: Colors.black54)),
-              SizedBox(height: 2),
-              // El nombre ya lo pones abajo dinámico (lo mantenemos igual)
-            ],
-          ),
-        ),
-      ],
-    ),
-  ),
-);
-
 
     ListTile item({
       required IconData icon,
@@ -635,8 +676,7 @@ Widget header = InkWell(
                                 onPressed: _procesandoConexion ? null : _alternarEstadoConexion,
                                 style: TextButton.styleFrom(
                                   backgroundColor: conectado ? Colors.white : const Color(0xFF2E7D32),
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
                                 child: Text(
