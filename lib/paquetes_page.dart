@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
-import 'recolectados_centros_page.dart'; // << agrega este import
+import 'recolectados_centros_page.dart';
 
 import 'escanear_paquete_page.dart';
 import 'perfil_page.dart';
@@ -15,11 +15,15 @@ import 'entrega_fallida_page.dart';
 import 'login_page.dart'; // para globalNombre / globalUserId si los tienes
 import 'package:shared_preferences/shared_preferences.dart';
 import 'recolectar_tiendas_page.dart';
-import 'recoger_almacen_page.dart';  // <-- FALTA ESTE
+import 'recoger_almacen_page.dart';
 
+// NUEVO: mostrar QR propio y pantalla de delegar
+import 'package:qr_flutter/qr_flutter.dart';
+import 'delegar_paquete_page.dart';
 
-
-
+// (si existen como globals en login_page.dart)
+// String? globalNombre;
+// String? globalUserId;
 
 class PaquetesPage extends StatefulWidget {
   const PaquetesPage({super.key});
@@ -29,7 +33,7 @@ class PaquetesPage extends StatefulWidget {
 }
 
 class _PaquetesPageState extends State<PaquetesPage> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>(); // << Drawer
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>(); // Drawer
   final List<Map<String, dynamic>> _paquetes = [];
   List<Map<String, dynamic>> _paquetesFiltrados = [];
   final TextEditingController _searchController = TextEditingController();
@@ -39,7 +43,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
   String? _estadoConexion;
   bool _procesandoConexion = false;
 
-  // Filtro (desde el encabezado)
+  // (la lógica de filtro por tipo se mantiene por compatibilidad)
   String _filtroTipo = 'Todos'; // Todos | HD0D | HD1D
 
   late DatabaseReference _estadoConexionRef;
@@ -66,30 +70,60 @@ class _PaquetesPageState extends State<PaquetesPage> {
   }
 
   void _irARecolectarTiendas() {
-    // Debe estar DESconectado
-    if (!_requerirDesconexion()) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const RecolectarTiendasPage()),
-    );
+    if (!_requerirDesconexion()) return; // debe estar desconectado
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const RecolectarTiendasPage()));
   }
 
   void _irARecogerEnAlmacen() {
-  // Debe estar DESconectado
-  if (!_requerirDesconexion()) return;
+    if (!_requerirDesconexion()) return; // debe estar desconectado
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const RecogerAlmacenPage()));
+  }
 
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const RecogerAlmacenPage()),
-  );
-}
+  // =============== Mostrar mi QR (globalUserId / uid) ===============
+  void _mostrarMiQR() {
+    final user = FirebaseAuth.instance.currentUser;
+    final String data = (globalUserId?.trim().isNotEmpty ?? false)
+        ? globalUserId!.trim()
+        : (user?.uid ?? 'SIN_UID');
 
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Mi código (para delegar)'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            QrImageView(
+              data: data,
+              version: QrVersions.auto,
+              size: 220,
+              gapless: true,
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              data,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Muestra este QR para que otro conductor te delegue un paquete.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar')),
+        ],
+      ),
+    );
+  }
 
   // =============== Utilidades de tiempo ===============
   String _fmt(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
 
-  // =============== Filtros ===============
+  // =============== Filtros (por texto) ===============
   void _filtrarPaquetes() {
     final query = _searchController.text.toLowerCase();
     List<Map<String, dynamic>> base = [..._paquetes];
@@ -122,11 +156,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
 
     _estadoConexionSub = _estadoConexionRef.onValue.listen((event) {
       final estado = event.snapshot.value?.toString() ?? 'Desconectado';
-      if (mounted) {
-        setState(() {
-          _estadoConexion = estado;
-        });
-      }
+      if (mounted) setState(() => _estadoConexion = estado);
     });
 
     _verificarActivo(user.uid);
@@ -138,12 +168,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
     );
     final snap = await ref.get();
     final activo = snap.child('Activo').value?.toString().toLowerCase() ?? 'no';
-
     if (activo != 'si' && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const PerfilPage()),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const PerfilPage()));
     }
   }
 
@@ -153,9 +179,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Activa el GPS del dispositivo para continuar.')),
-      );
+      messenger.showSnackBar(const SnackBar(content: Text('Activa el GPS del dispositivo para continuar.')));
       return null;
     }
 
@@ -163,27 +187,20 @@ class _PaquetesPageState extends State<PaquetesPage> {
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
       if (perm == LocationPermission.denied) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Permiso de ubicación denegado.')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('Permiso de ubicación denegado.')));
         return null;
       }
     }
     if (perm == LocationPermission.deniedForever) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en Ajustes.')),
-      );
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Permiso de ubicación denegado permanentemente. Habilítalo en Ajustes.')));
       return null;
     }
 
     try {
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('No se pudo obtener la ubicación: $e')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text('No se pudo obtener la ubicación: $e')));
       return null;
     }
   }
@@ -205,14 +222,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
           title: const Text('Confirmar desconexión'),
           content: const Text('Solo desconéctate cuando ya no puedas continuar entregando paquetes.'),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('OK'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('OK')),
           ],
         ),
       );
@@ -233,9 +244,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
       final nombreDriver = (globalNombre?.toString().trim().isNotEmpty ?? false)
           ? globalNombre!
           : (userAuth.displayName ?? 'SinNombre');
-      final idDriver = (globalUserId?.toString().trim().isNotEmpty ?? false)
-          ? globalUserId!
-          : userAuth.uid;
+      final idDriver =
+          (globalUserId?.toString().trim().isNotEmpty ?? false) ? globalUserId! : userAuth.uid;
 
       final Map<String, String> base = {
         'Latitude': pos.latitude.toString(),
@@ -264,65 +274,44 @@ class _PaquetesPageState extends State<PaquetesPage> {
           'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/${userAuth.uid}/EstadoConexion',
         );
         await conductorRef.set(nuevoEstado);
-        if (mounted) {
-          setState(() {
-            _estadoConexion = nuevoEstado;
-          });
-        }
-        messenger.showSnackBar(
-          SnackBar(content: Text('Estado actualizado a $nuevoEstado')),
-        );
+        if (mounted) setState(() => _estadoConexion = nuevoEstado);
+        messenger.showSnackBar(SnackBar(content: Text('Estado actualizado a $nuevoEstado')));
       } else {
         messenger.showSnackBar(
           SnackBar(content: Text('Error del webhook (${res.statusCode}): ${res.body}')),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al cambiar estado: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al cambiar estado: $e')));
     } finally {
       if (mounted) setState(() => _procesandoConexion = false);
     }
   }
 
-  // =============== Requerir conexión / desconexión ===============
+  // =============== Reglas de conexión ===============
   bool get _estaConectado => _estadoConexion == 'Conectado';
 
   bool _requerirConexion() {
     if (_estaConectado) return true;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('No estás conectado'),
         content: const Text('Debes conectarte para gestionar paquetes.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar'),
-          ),
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
       ),
     );
     return false;
   }
 
-  // NUEVO: Debe estar DESconectado para continuar
   bool _requerirDesconexion() {
-    if (!_estaConectado) return true; // si NO está conectado, puede avanzar
-
+    if (!_estaConectado) return true;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Estás conectado'),
-        content: const Text('Debes desconectarte para recolectar en tienda.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar'),
-          ),
-        ],
+        content: const Text('Debes desconectarte para realizar la delegación de paquetes.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
       ),
     );
     return false;
@@ -381,9 +370,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
       _paquetesFiltrados = [];
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al escuchar paquetes: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error al escuchar paquetes: $e')));
       }
     });
   }
@@ -412,10 +400,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
     await FirebaseAuth.instance.signOut();
     await _paquetesSub?.cancel();
     await _estadoConexionSub?.cancel();
-
-    if (mounted) {
-      Navigator.pushReplacementNamed(context, '/login');
-    }
+    if (mounted) Navigator.pushReplacementNamed(context, '/login');
   }
 
   void _mostrarAlertaDevolucion() {
@@ -437,7 +422,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
     final nowMs = now.millisecondsSinceEpoch;
     final estimada = DateTime.fromMillisecondsSinceEpoch(nowMs + 28800000); // +8h
 
-    final url = Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_woPgim5JFu1wFjHR21cHnK');
+    final url =
+        Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_woPgim5JFu1wFjHR21cHnK');
 
     final body = <String, String>{
       'Estatus': 'RP',
@@ -463,9 +449,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
   // ======== Drawer ========
   Drawer _buildDrawer(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final nombre = (globalNombre?.trim().isNotEmpty ?? false)
-        ? globalNombre!
-        : (user?.displayName ?? 'Usuario');
+    final nombre =
+        (globalNombre?.trim().isNotEmpty ?? false) ? globalNombre! : (user?.displayName ?? 'Usuario');
     final foto = user?.photoURL;
 
     Widget header = Padding(
@@ -474,9 +459,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
         children: [
           CircleAvatar(
             radius: 24,
-            backgroundImage: (foto != null && foto.isNotEmpty)
-                ? NetworkImage(foto)
-                : null,
+            backgroundImage: (foto != null && foto.isNotEmpty) ? NetworkImage(foto) : null,
             child: (foto == null || foto.isEmpty)
                 ? const Icon(Icons.person, color: Colors.white)
                 : null,
@@ -520,18 +503,13 @@ class _PaquetesPageState extends State<PaquetesPage> {
     }
 
     void _proximamente(String nombre) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$nombre: próximamente')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$nombre: próximamente')));
     }
 
     return Drawer(
       width: 290,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topRight: Radius.circular(16),
-          bottomRight: Radius.circular(16),
-        ),
+        borderRadius: BorderRadius.only(topRight: Radius.circular(16), bottomRight: Radius.circular(16)),
       ),
       child: SafeArea(
         child: Column(
@@ -539,46 +517,55 @@ class _PaquetesPageState extends State<PaquetesPage> {
             header,
             Expanded(
               child: ListView(
-  padding: EdgeInsets.zero,
-  children: [
-    item(
-      icon: Icons.store_mall_directory_outlined,
-      text: 'Recolectar en tienda',
-      onTap: _irARecolectarTiendas, // exige estar DESconectado
-    ),
-    item(
-      icon: Icons.route_outlined,
-      text: 'Rutas disponibles',
-      onTap: () => _proximamente('Rutas disponibles'),
-    ),
-    item(
-      icon: Icons.group_add_outlined,
-      text: 'Delegar paquete',
-      onTap: () => _proximamente('Delegar paquete'),
-    ),
-    item(
-      icon: Icons.inventory_2_outlined,
-      text: 'Paquetes recolectados',
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
-        );
-      },
-    ),
-    item(
-      icon: Icons.local_shipping_outlined,
-      text: 'Recoger paquete en almacén',
-      onTap: _irARecogerEnAlmacen, // << ahora exige estar DESconectado
-    ),
-    item(
-      icon: Icons.assignment_return_outlined,
-      text: 'Devoluciones',
-      onTap: () => _proximamente('Devoluciones'),
-    ),
-  ],
-),
+                padding: EdgeInsets.zero,
+                children: [
+                  item(
+                    icon: Icons.store_mall_directory_outlined,
+                    text: 'Recolectar en tienda',
+                    onTap: _irARecolectarTiendas,
+                  ),
+                  item(
+                    icon: Icons.route_outlined,
+                    text: 'Rutas disponibles',
+                    onTap: () => _proximamente('Rutas disponibles'),
+                  ),
+                  item(
+                    icon: Icons.group_add_outlined,
+                    text: 'Delegar paquete',
+                    onTap: () async {
+                      // ⚠️ Debe estar DESCONECTADO para delegar
+                      if (!_requerirDesconexion()) return;
 
+                      // ir a la pantalla de escaneo de conductor
+                      await Navigator.push<String?>(
+                        context,
+                        MaterialPageRoute(builder: (_) => const DelegarPaquetePage()),
+                      );
+                      // No necesitamos manejar el código aquí; el flujo continúa en las pantallas de delegación
+                    },
+                  ),
+                  item(
+                    icon: Icons.inventory_2_outlined,
+                    text: 'Paquetes recolectados',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const RecolectadosCentrosPage()),
+                      );
+                    },
+                  ),
+                  item(
+                    icon: Icons.local_shipping_outlined,
+                    text: 'Recoger paquete en almacén',
+                    onTap: _irARecogerEnAlmacen,
+                  ),
+                  item(
+                    icon: Icons.assignment_return_outlined,
+                    text: 'Devoluciones',
+                    onTap: () => _proximamente('Devoluciones'),
+                  ),
+                ],
+              ),
             ),
             const Divider(height: 1),
             ListTile(
@@ -610,7 +597,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
       child: Scaffold(
-        key: _scaffoldKey, // << necesario para openDrawer()
+        key: _scaffoldKey,
         drawer: _buildDrawer(context),
         backgroundColor: const Color(0xFFF2F3F7),
         body: SafeArea(
@@ -624,15 +611,13 @@ class _PaquetesPageState extends State<PaquetesPage> {
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
                       decoration: const BoxDecoration(
                         color: Color(0xFF1955CC),
-                        borderRadius: BorderRadius.only(
-                          bottomLeft: Radius.circular(16),
-                          bottomRight: Radius.circular(16),
-                        ),
+                        borderRadius:
+                            BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Fila superior: menú + botón conectar/desconectar
+                          // fila superior
                           Row(
                             children: [
                               IconButton(
@@ -644,7 +629,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                 onPressed: _procesandoConexion ? null : _alternarEstadoConexion,
                                 style: TextButton.styleFrom(
                                   backgroundColor: conectado ? Colors.white : const Color(0xFF2E7D32),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
                                 child: Text(
@@ -671,7 +657,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                           ),
                           const SizedBox(height: 12),
 
-                          // Buscador + 2 cuadritos en la MISMA FILA
+                          // Buscador + 2 botones en la misma fila
                           Row(
                             children: [
                               Expanded(
@@ -693,10 +679,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                 ),
                               ),
                               const SizedBox(width: 10),
-                              _SquareIconButton(
-                                icon: Icons.tune,
-                                onTap: _abrirFiltroTipo,
-                              ),
+                              // ESTE BOTÓN AHORA MUESTRA EL QR
+                              _SquareIconButton(icon: Icons.tune, onTap: _mostrarMiQR),
                               const SizedBox(width: 10),
                               _SquareIconButton(
                                 icon: Icons.grid_view_rounded,
@@ -714,7 +698,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                       ),
                     ),
 
-                    // “Píldora” Orden Fast
+                    // Píldora con contador
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                       child: Align(
@@ -724,9 +708,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(24),
-                            boxShadow: const [
-                              BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
-                            ],
+                            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
                           ),
                           child: Text(
                             'Número de paquetes: $_cantidadPaquetes',
@@ -757,7 +739,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                   esEspecial: esEspecial,
                                   onEntregar: () async {
                                     if (!_requerirConexion()) return;
-
                                     final user = FirebaseAuth.instance.currentUser;
                                     if (user == null) return;
 
@@ -806,7 +787,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                   },
                                   onRechazar: () async {
                                     if (!_requerirConexion()) return;
-
                                     final user = FirebaseAuth.instance.currentUser;
                                     if (user == null) return;
 
@@ -816,17 +796,11 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                     );
 
                                     final snapshot = await paqueteRef.get();
-                                    final tnReference =
-                                        snapshot.child('TnReference').value?.toString() ?? '';
-                                    final telefono =
-                                        snapshot.child('Telefono').value?.toString() ?? '';
-                                    // final idPaquetePB = snapshot.child('idPB').value?.toString() ?? ''; // (si lo necesitas)
+                                    final tnReference = snapshot.child('TnReference').value?.toString() ?? '';
+                                    final telefono = snapshot.child('Telefono').value?.toString() ?? '';
 
                                     try {
-                                      await _enviarWebhookRP(
-                                        paqueteId: paqueteId,
-                                        tnReference: tnReference,
-                                      );
+                                      await _enviarWebhookRP(paqueteId: paqueteId, tnReference: tnReference);
                                     } catch (e) {
                                       if (mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
@@ -834,10 +808,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                         );
                                       }
                                     } finally {
-                                      await _limpiarNotificarRp(
-                                        userId: user.uid,
-                                        paqueteId: paqueteId,
-                                      );
+                                      await _limpiarNotificarRp(userId: user.uid, paqueteId: paqueteId);
                                     }
 
                                     final intentosRaw = snapshot.child('Intentos').value;
@@ -858,8 +829,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                           telefono: telefono,
                                           tnReference: tnReference,
                                           destinatario: paquete['Destinatario'],
-                                          // >>>>>>>>>>>>>>>>> NUEVO: enviamos el ID del registro
-                                          paqueteId: paqueteId,
+                                          paqueteId: paqueteId, // << importante
                                         ),
                                       ),
                                     );
@@ -878,52 +848,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
       ),
     );
   }
-
-  // Bottom sheet de filtro
-  void _abrirFiltroTipo() async {
-    final sel = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 12),
-              const Text('Filtrar por tipo de envío', style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              _OpcionFiltro(
-                titulo: 'Todos',
-                seleccionado: _filtroTipo == 'Todos',
-                onTap: () => Navigator.pop(context, 'Todos'),
-              ),
-              _OpcionFiltro(
-                titulo: 'HD0D',
-                seleccionado: _filtroTipo == 'HD0D',
-                onTap: () => Navigator.pop(context, 'HD0D'),
-              ),
-              _OpcionFiltro(
-                titulo: 'HD1D',
-                seleccionado: _filtroTipo == 'HD1D',
-                onTap: () => Navigator.pop(context, 'HD1D'),
-              ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (sel != null && sel != _filtroTipo) {
-      setState(() {
-        _filtroTipo = sel;
-      });
-      _filtrarPaquetes();
-    }
-  }
 }
 
 // ===== Widgets de apoyo =====
@@ -940,28 +864,12 @@ class _SquareIconButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: SizedBox(
+        child: const SizedBox(
           width: 40,
           height: 40,
-          child: Center(child: Icon(icon, color: Colors.white)),
+          child: Center(child: Icon(Icons.tune, color: Colors.white)), // icon se ignora visualmente
         ),
       ),
-    );
-  }
-}
-
-class _OpcionFiltro extends StatelessWidget {
-  final String titulo;
-  final bool seleccionado;
-  final VoidCallback onTap;
-  const _OpcionFiltro({required this.titulo, required this.seleccionado, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      title: Text(titulo),
-      trailing: seleccionado ? const Icon(Icons.check, color: Colors.green) : null,
-      onTap: onTap,
     );
   }
 }
@@ -996,91 +904,65 @@ class _PaqueteCard extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  esEspecial ? Icons.bolt : Icons.inventory_2_outlined,
-                  color: esEspecial ? Colors.amber[700] : const Color(0xFF1A3365),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('#$id', style: const TextStyle(fontWeight: FontWeight.w700)),
-                ),
-                if (esEspecial)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.yellow[700],
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      tipoEnvio,
-                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text.rich(
-              TextSpan(
-                style: DefaultTextStyle.of(context).style,
-                children: [
-                  const TextSpan(text: 'Dirección\n', style: TextStyle(fontWeight: FontWeight.w700)),
-                  TextSpan(text: direccion),
-                ],
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(
+            children: [
+              Icon(
+                esEspecial ? Icons.bolt : Icons.inventory_2_outlined,
+                color: esEspecial ? Colors.amber[700] : const Color(0xFF1A3365),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text.rich(
-              TextSpan(
-                style: DefaultTextStyle.of(context).style,
-                children: [
-                  const TextSpan(text: 'Propietario\n', style: TextStyle(fontWeight: FontWeight.w700)),
-                  TextSpan(text: destinatario),
-                ],
+              const SizedBox(width: 8),
+              Expanded(child: Text('#$id', style: const TextStyle(fontWeight: FontWeight.w700))),
+              if (esEspecial)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: Colors.yellow[700], borderRadius: BorderRadius.circular(6)),
+                  child: Text(tipoEnvio, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text.rich(TextSpan(style: DefaultTextStyle.of(context).style, children: const [
+            TextSpan(text: 'Dirección\n', style: TextStyle(fontWeight: FontWeight.w700)),
+          ])),
+          Text(direccion),
+          const SizedBox(height: 4),
+          Text.rich(TextSpan(style: DefaultTextStyle.of(context).style, children: const [
+            TextSpan(text: 'Propietario\n', style: TextStyle(fontWeight: FontWeight.w700)),
+          ])),
+          Text(destinatario),
+          const SizedBox(height: 4),
+          Text('Intentos: $intentos'),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: onEntregar,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2F63D3),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child:
+                      const Text('Entregado', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text('Intentos: $intentos'),
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: onEntregar,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2F63D3),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text(
-                      'Entregado',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                    ),
-                  ),
+              const SizedBox(width: 10),
+              InkWell(
+                onTap: onRechazar,
+                borderRadius: BorderRadius.circular(10),
+                child: Ink(
+                  width: 44,
+                  height: 44,
+                  decoration:
+                      BoxDecoration(color: const Color(0xFFE53935), borderRadius: BorderRadius.circular(10)),
+                  child: const Center(child: Icon(Icons.error_outline, color: Colors.white)),
                 ),
-                const SizedBox(width: 10),
-                InkWell(
-                  onTap: onRechazar,
-                  borderRadius: BorderRadius.circular(10),
-                  child: Ink(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE53935),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Center(child: Icon(Icons.error_outline, color: Colors.white)),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ]),
       ),
     );
   }

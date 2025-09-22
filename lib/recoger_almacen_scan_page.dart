@@ -46,7 +46,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
   bool _enviando = false;
 
   static const String _webhookUrl =
-      'https://editor.apphive.io/hook/ccp_fsV5EnyprpgEzVVJq62Cbf';
+      'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fsV5EnyprpgEzVVJq62Cbf';
 
   @override
   void initState() {
@@ -88,7 +88,23 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
     final code = _norm(rawCode);
     if (code.isEmpty) return;
 
-    if (_codesProcesados.contains(code)) return;
+    // Si ya se procesó antes, no vuelvas a consultar Firebase, pero
+    // si ya está en la lista, súbelo al tope.
+    if (_codesProcesados.contains(code)) {
+      if (_seleccionados.contains(code)) {
+        setState(() {
+          _seleccionados.remove(code);
+          _seleccionados.insert(0, code); // mover al tope
+        });
+      } else {
+        // Ya fue procesado pero no está en la lista (p.ej. se eliminó)
+        // Permitimos re-insertarlo al tope sin volver a consultar.
+        setState(() => _seleccionados.insert(0, code));
+      }
+      return;
+    }
+
+    // Marcar como procesado para evitar consultas concurrentes repetidas
     _codesProcesados.add(code);
 
     try {
@@ -99,11 +115,17 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
 
       if (snap.exists) {
         if (_seleccionados.contains(code)) {
+          // Ya estaba: lo llevamos al tope
+          setState(() {
+            _seleccionados.remove(code);
+            _seleccionados.insert(0, code);
+          });
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Este paquete ya fue añadido.')),
+            const SnackBar(content: Text('Este paquete ya estaba en la lista. Se movió arriba.')),
           );
         } else {
-          setState(() => _seleccionados.add(code));
+          // Nuevo: insertar al inicio
+          setState(() => _seleccionados.insert(0, code));
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -111,11 +133,14 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
             content: Text('El código no pertenece a este almacén.'),
           ),
         );
+        // Si no existe en Firebase, desmarcamos para permitir intentarlo nuevamente si fue un error de lectura
+        _codesProcesados.remove(code);
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error al validar: $e')),
       );
+      _codesProcesados.remove(code);
     }
   }
 
@@ -134,6 +159,8 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
   void _eliminar(String code) {
     setState(() {
       _seleccionados.remove(code);
+      // Permitir volver a añadirlo si se elimina
+      _codesProcesados.remove(code);
     });
   }
 
@@ -142,12 +169,10 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
 
   String _fmtYYYYMMDD(DateTime dt) {
     return '${dt.year}-${_two(dt.month)}-${_two(dt.day)}';
-    // YYYY-MM-DD
   }
 
   String _fmtYYYYMMDDHHMMSS(DateTime dt) {
     return '${dt.year}-${_two(dt.month)}-${_two(dt.day)} ${_two(dt.hour)}:${_two(dt.minute)}:${_two(dt.second)}';
-    // YYYY-MM-DD HH:mm:ss
   }
 
   // ====== construir payload y enviar webhook ======
@@ -198,7 +223,6 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Información enviada.')),
         );
-        // Regresar una pantalla
         Navigator.pop(context);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(

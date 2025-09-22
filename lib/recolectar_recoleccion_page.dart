@@ -82,6 +82,9 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
 
   final TextEditingController _buscarCtrl = TextEditingController();
 
+  // NEW: controlador de scroll para llevar la lista al tope luego de insertar
+  final ScrollController _listCtrl = ScrollController();
+
   // ====== Scanner embebido ======
   final GlobalKey _qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? _qrController;
@@ -114,6 +117,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     _buscarCtrl.dispose();
     _qrController?.dispose();
     _firmaSub?.cancel();
+    _listCtrl.dispose(); // NEW
     super.dispose();
   }
 
@@ -303,13 +307,47 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   }
 
   /// Convierte un timestamp en milisegundos a "YYYY-MM-DD HH:MM:SS"
-  String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
-    final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
-    final base = _fmtYYYYMMDD(ms, useUtc: useUtc);
-    final hh = _two(dt.hour);
-    final mm = _two(dt.minute);
-    final ss = _two(dt.second);
-    return '$base $hh:$mm:$ss';
+/// Convierte un timestamp en milisegundos a "YYYY-MM-DD HH:MM:SS"
+String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
+  final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
+  final base = _fmtYYYYMMDD(ms, useUtc: useUtc);
+  final hh = _two(dt.hour);
+  final mm = _two(dt.minute);
+  final ss = _two(dt.second);
+  return '$base $hh:$mm:$ss';
+}
+
+
+  // ====== Manejo de lista (insertar/mover al tope) ======
+  void _insertarAlTope(PaqueteLocal p, {bool mostrarAvisoSiExistia = false}) {
+    setState(() {
+      final idx = _seleccionados.indexWhere((e) => e.idGuiaPB == p.idGuiaPB);
+      if (idx >= 0) {
+        // ya estaba: lo movemos al tope
+        _seleccionados.removeAt(idx);
+        _seleccionados = [p, ..._seleccionados];
+      } else {
+        // no estaba: insertamos al tope
+        _seleccionados = [p, ..._seleccionados];
+      }
+    });
+
+    // Llevar la lista al principio suavemente
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_listCtrl.hasClients) {
+        _listCtrl.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+
+    if (mostrarAvisoSiExistia) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Paquete movido al inicio.')),
+      );
+    }
   }
 
   // ====== Manejo de códigos ======
@@ -331,17 +369,15 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       return;
     }
 
-    final yaExiste = _seleccionados.any((e) => e.idGuiaPB == p.idGuiaPB);
-    if (yaExiste) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Este paquete ya fue añadido.')),
-      );
+    final idxExiste = _seleccionados.indexWhere((e) => e.idGuiaPB == p.idGuiaPB);
+    if (idxExiste >= 0) {
+      // En vez de avisar "ya fue añadido", lo movemos al tope
+      _insertarAlTope(p, mostrarAvisoSiExistia: true);
       return;
     }
 
-    setState(() {
-      _seleccionados = [..._seleccionados, p];
-    });
+    // NEW: insertar el escaneado en la primera posición
+    _insertarAlTope(p);
   }
 
   void _agregarPorInput() {
@@ -816,7 +852,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
               ),
             ),
 
-            // ===== Lista de seleccionados =====
+            // ===== Lista de seleccionados (más reciente arriba) =====
             Expanded(
               child: _seleccionados.isEmpty
                   ? const Center(
@@ -829,6 +865,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
                       ),
                     )
                   : ListView.builder(
+                      controller: _listCtrl, // NEW
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 110),
                       itemCount: _seleccionados.length,
                       itemBuilder: (_, i) {
