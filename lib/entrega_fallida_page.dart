@@ -69,6 +69,9 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   // id del paquete actual (idPB). Si no viene en paqueteId, lo resolvemos desde Historal/{tnRef}/idPB
   String? _idPBActual;
 
+  // >>> NUEVO: condición para habilitar el Guardar (exige evidencia)
+  bool get _tieneEvidencia => (_urlImagen ?? '').trim().isNotEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -188,7 +191,7 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
       setState(() {
         _imagenes[0] = image; // mantenemos referencia al File (por si la necesitas)
         _previewJpeg = compressed; // mostramos preview comprimido
-        _urlImagen = url;
+        _urlImagen = url;          // <<< Esto activa el botón Guardar
       });
 
       messenger.hideCurrentSnackBar();
@@ -621,7 +624,14 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
                           fit: BoxFit.cover,
                         ),
                       ),
-                    ]
+                    ],
+                    if (!_tieneEvidencia) ...[
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Debes adjuntar al menos una imagen para continuar.',
+                        style: TextStyle(fontSize: 12, color: Colors.red),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -658,119 +668,123 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
 
               const SizedBox(height: 14),
 
-              // BOTÓN GUARDAR
+              // BOTÓN GUARDAR (deshabilitado si no hay evidencia)
               SizedBox(
                 height: 48,
                 child: ElevatedButton(
-                  onPressed: () async {
-                    // Historal se sigue actualizando por tnReference (ruta humana)
-                    final idHistoral = Uri.decodeFull(widget.tnReference).trim();
-                    final DatabaseReference ref = FirebaseDatabase.instance
-                        .ref("projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idHistoral");
+                  onPressed: _tieneEvidencia
+                      ? () async {
+                          // Historal se sigue actualizando por tnReference (ruta humana)
+                          final idHistoral = Uri.decodeFull(widget.tnReference).trim();
+                          final DatabaseReference ref = FirebaseDatabase.instance
+                              .ref("projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/$idHistoral");
 
-                    try {
-                      final snapshot = await ref.child('Fallos').get();
-                      final snapshotIdPB = await ref.child('idPB').get();
+                          try {
+                            final snapshot = await ref.child('Fallos').get();
+                            final snapshotIdPB = await ref.child('idPB').get();
 
-                      int intento = 1;
-                      if (snapshot.exists) {
-                        final valor = snapshot.value;
-                        intento = int.tryParse(valor.toString()) != null
-                            ? int.parse(valor.toString()) + 1
-                            : 1;
-                      }
+                            int intento = 1;
+                            if (snapshot.exists) {
+                              final valor = snapshot.value;
+                              intento = int.tryParse(valor.toString()) != null
+                                  ? int.parse(valor.toString()) + 1
+                                  : 1;
+                            }
 
-                      final String idPBEnHistoral = snapshotIdPB.value?.toString() ?? '';
+                            final String idPBEnHistoral = snapshotIdPB.value?.toString() ?? '';
 
-                      final codigoFalla = 'FL$intento';
-                      final fechaAhora = DateTime.now();
-                      final formato = DateFormat('yyyy-MM-dd HH:mm:ss');
-                      final yyyyMMddHHmmss = formato.format(fechaAhora);
-                      await ref.update({
-                        'Estatus': codigoFalla,
-                        'Fallos': intento,
-                        'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
-                      });
+                            final codigoFalla = 'FL$intento';
+                            final fechaAhora = DateTime.now();
+                            final formato = DateFormat('yyyy-MM-dd HH:mm:ss');
+                            final yyyyMMddHHmmss = formato.format(fechaAhora);
+                            await ref.update({
+                              'Estatus': codigoFalla,
+                              'Fallos': intento,
+                              'FechaEstatus': snapshot.exists ? ServerValue.timestamp : yyyyMMddHHmmss,
+                            });
 
-                      final Position posicion = _posicionActual ??
-                          await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+                            final Position posicion = _posicionActual ??
+                                await Geolocator.getCurrentPosition(
+                                    desiredAccuracy: LocationAccuracy.high);
 
-                      final nota = _notaController.text.trim();
+                            final nota = _notaController.text.trim();
 
-                      // idPBs para payload (actual + multientrega)
-                      final List<String> referencias = _todasLasGuias;
-                      final bool esMulti = referencias.length > 1;
+                            // idPBs para payload (actual + multientrega)
+                            final List<String> referencias = _todasLasGuias;
+                            final bool esMulti = referencias.length > 1;
 
-                      Map<String, dynamic> dataPayload;
+                            Map<String, dynamic> dataPayload;
 
-                      if (esMulti) {
-                        // MULTI: ya tenemos idPBs listos
-                        final Set<String> unicasIdPB = referencias
-                            .map((e) => e.trim())
-                            .where((e) => e.isNotEmpty)
-                            .toSet();
+                            if (esMulti) {
+                              // MULTI: ya tenemos idPBs listos
+                              final Set<String> unicasIdPB = referencias
+                                  .map((e) => e.trim())
+                                  .where((e) => e.isNotEmpty)
+                                  .toSet();
 
-                        if (unicasIdPB.isEmpty) {
-                          await _alert('Faltan idPB', 'No hay paquetes válidos para enviar.');
-                          return;
+                              if (unicasIdPB.isEmpty) {
+                                await _alert('Faltan idPB', 'No hay paquetes válidos para enviar.');
+                                return;
+                              }
+
+                              dataPayload = {for (final id in unicasIdPB) id: {"idGuia": id}};
+                            } else {
+                              // SINGLE: usa paqueteId (idPB) recibido
+                              final String idParaEnviar = (widget.paqueteId).trim().isNotEmpty
+                                  ? widget.paqueteId.trim()
+                                  : (_idPBActual ?? '').trim();
+
+                              if (idParaEnviar.isEmpty) {
+                                await _alert(
+                                  "Falta paqueteId",
+                                  "No se recibió un paqueteId (idPB) válido desde la pantalla anterior.",
+                                );
+                                return;
+                              }
+
+                              dataPayload = {idParaEnviar: {"idGuia": idParaEnviar}};
+                            }
+
+                            final now = DateTime.now();
+                            final yyyyMMdd =
+                                '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+                            final Map<String, dynamic> body = {
+                              "Evidencia1": _urlImagen ?? "",
+                              "Intentos": intento,
+                              "Latitude": posicion.latitude.toString(),
+                              "Longitude": posicion.longitude.toString(),
+                              "MotivoFalla": _motivo,
+                              "NombreDriver": globalNombre ?? "SinNombre",
+                              "NotaExtra": nota,
+                              "Timestamp": DateTime.now().millisecondsSinceEpoch,
+                              "idDriver": globalUserId ?? "",
+                              "data": dataPayload, // <<<<< idPBs como keys
+                              "YYYYMMDD": yyyyMMdd,
+                              "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
+                            };
+
+                            final response = await http.post(
+                              Uri.parse(
+                                  'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_avzsN6aBS9zC1yY5H6xxtq'),
+                              headers: {HttpHeaders.contentTypeHeader: 'application/json'},
+                              body: jsonEncode(body),
+                            );
+
+                            if (!mounted) return;
+
+                            if (response.statusCode == 200) {
+                              _snack('Entrega fallida registrada correctamente');
+                              Navigator.pop(context);
+                            } else {
+                              _snack('Error al enviar webhook: ${response.body}');
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            _snack('Ocurrió un error: $e');
+                          }
                         }
-
-                        dataPayload = {for (final id in unicasIdPB) id: {"idGuia": id}};
-                      } else {
-                        // SINGLE: usa paqueteId (idPB) recibido
-                        final String idParaEnviar = (widget.paqueteId).trim().isNotEmpty
-                            ? widget.paqueteId.trim()
-                            : (_idPBActual ?? '').trim();
-
-                        if (idParaEnviar.isEmpty) {
-                          await _alert(
-                            "Falta paqueteId",
-                            "No se recibió un paqueteId (idPB) válido desde la pantalla anterior.",
-                          );
-                          return;
-                        }
-
-                        dataPayload = {idParaEnviar: {"idGuia": idParaEnviar}};
-                      }
-
-                      final now = DateTime.now();
-                      final yyyyMMdd =
-                          '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-
-                      final Map<String, dynamic> body = {
-                        "Evidencia1": _urlImagen ?? "",
-                        "Intentos": intento,
-                        "Latitude": posicion.latitude.toString(),
-                        "Longitude": posicion.longitude.toString(),
-                        "MotivoFalla": _motivo,
-                        "NombreDriver": globalNombre ?? "SinNombre",
-                        "NotaExtra": nota,
-                        "Timestamp": DateTime.now().millisecondsSinceEpoch,
-                        "idDriver": globalUserId ?? "",
-                        "data": dataPayload, // <<<<< idPBs como keys
-                        "YYYYMMDD": yyyyMMdd,
-                        "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
-                      };
-
-                      final response = await http.post(
-                        Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_avzsN6aBS9zC1yY5H6xxtq'),
-                        headers: {HttpHeaders.contentTypeHeader: 'application/json'},
-                        body: jsonEncode(body),
-                      );
-
-                      if (!mounted) return;
-
-                      if (response.statusCode == 200) {
-                        _snack('Entrega fallida registrada correctamente');
-                        Navigator.pop(context);
-                      } else {
-                        _snack('Error al enviar webhook: ${response.body}');
-                      }
-                    } catch (e) {
-                      if (!mounted) return;
-                      _snack('Ocurrió un error: $e');
-                    }
-                  },
+                      : null,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: brand,
                     foregroundColor: Colors.white,

@@ -69,6 +69,10 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     'Otro',
   ];
 
+  // 🔒 NUEVO: helper para saber si hay al menos 1 imagen lista
+  bool get _tieneAlMenosUnaImagen =>
+      _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+
   @override
   void initState() {
     super.initState();
@@ -530,29 +534,28 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           ),
         ),
         actions: [
-    TextButton(
-  onPressed: () async {
-    final idBase = Uri.decodeFull(widget.id).trim();
+          TextButton(
+            onPressed: () async {
+              final idBase = Uri.decodeFull(widget.id).trim();
 
-    final resultado = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MultiGuiasPage(
-          initialGuias: {idBase, ..._guiasMulti}.toList(), // 👈 ya marcadas
-        ),
-      ),
-    );
+              final resultado = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MultiGuiasPage(
+                    initialGuias: {idBase, ..._guiasMulti}.toList(), // 👈 ya marcadas
+                  ),
+                ),
+              );
 
-    if (resultado != null && resultado is List<String>) {
-      final idBase2 = Uri.decodeFull(widget.id).trim();
-      setState(() {
-        _guiasMulti = {idBase2, ...resultado}.toList(); // aseguras id base y evitas duplicados
-      });
-    }
-  },
-  child: Text('MultiGuía', style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
-)
-
+              if (resultado != null && resultado is List<String>) {
+                final idBase2 = Uri.decodeFull(widget.id).trim();
+                setState(() {
+                  _guiasMulti = {idBase2, ...resultado}.toList(); // aseguras id base y evitas duplicados
+                });
+              }
+            },
+            child: Text('MultiGuía', style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
+          )
         ],
       ),
       body: Center(
@@ -653,6 +656,16 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: List.generate(3, _photoSlot),
                         ),
+
+                        // 🔒 Aviso visual cuando NO hay imágenes aún
+                        if (!_tieneAlMenosUnaImagen) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Debes adjuntar al menos 1 imagen para poder guardar.',
+                            style: TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w600),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -694,84 +707,96 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
               SizedBox(
                 height: 48,
                 child: ElevatedButton(
-                  onPressed: () async {
-                    // ---------- LÓGICA ORIGINAL (NO TOCAR) ----------
-                    final timestamp = DateTime.now();
-                    final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
-                    final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
+                  // 🔒 Deshabilitar si no hay al menos 1 imagen
+                  onPressed: _tieneAlMenosUnaImagen
+                      ? () async {
+                          // 🔒 Doble chequeo por seguridad (evita condiciones de carrera)
+                          if (!_tieneAlMenosUnaImagen) {
+                            _snack('Debes adjuntar al menos 1 imagen para poder guardar.');
+                            return;
+                          }
 
-                    final recibe = _quienRecibeController.text.trim();
-                    final parentesco = _opcionSeleccionada;
-                    final nota = _notaController.text.trim();
+                          // ---------- LÓGICA ORIGINAL (NO TOCAR) ----------
+                          final timestamp = DateTime.now();
+                          final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
+                          final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
 
-                    final alMenosUnaFoto =
-                        _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
-                    final estadoFoto = alMenosUnaFoto
-                        ? "el usuario dejó tomarse la foto"
-                        : "el usuario no se dejó tomar la foto";
+                          final recibe = _quienRecibeController.text.trim();
+                          final parentesco = _opcionSeleccionada;
+                          final nota = _notaController.text.trim();
 
-                    final textoNota =
-                        "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
+                          final alMenosUnaFoto =
+                              _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+                          final estadoFoto = alMenosUnaFoto
+                              ? "el usuario dejó tomarse la foto"
+                              : "el usuario no se dejó tomar la foto";
 
-                    // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
-                    // data: si hay multiguías usa esas; si no, usa el id del registro (decodificado)
-                    final String idRegistro = Uri.decodeFull(widget.id).trim();
-                    final List<String> fuentes = _guiasMulti.isNotEmpty ? _guiasMulti : [idRegistro];
+                          final textoNota =
+                              "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
 
-                    // Opcional: deduplicar por si se repite algo
-                    final Set<String> unicas = fuentes.map((e) => e.trim()).toSet();
+                          // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
+                          // data: si hay multiguías usa esas; si no, usa el id del registro (decodificado)
+                          final String idRegistro = Uri.decodeFull(widget.id).trim();
+                          final List<String> fuentes = _guiasMulti.isNotEmpty ? _guiasMulti : [idRegistro];
 
-                    final Map<String, dynamic> dataPayload = {
-                      for (final guia in unicas) guia: {'idGuia': guia}
-                    };
+                          // Opcional: deduplicar por si se repite algo
+                          final Set<String> unicas = fuentes.map((e) => e.trim()).toSet();
 
-                    final body = {
-                      "Evidencia1": _urlImagen1 ?? "",
-                      "Evidencia2": _urlImagen2 ?? "",
-                      "Evidencia3": _urlImagen3 ?? "",
-                      "Latitude": _posicionActual?.latitude.toString() ?? "",
-                      "Longitude": _posicionActual?.longitude.toString() ?? "",
-                      "NombreDriver": globalNombre ?? "SinNombre",
-                      "Nota": textoNota,
-                      "TimeStamp": DateTime.now().millisecondsSinceEpoch,
-                      "Parentesco": parentesco,
-                      "NombreRecibe": recibe,
-                      "YYYYMMDD": yyyyMMdd,
-                      "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
-                      "idDriver": globalUserId ?? "",
-                      "data": dataPayload,
-                    };
+                          final Map<String, dynamic> dataPayload = {
+                            for (final guia in unicas) guia: {'idGuia': guia}
+                          };
 
-                    try {
-                      const webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
+                          final body = {
+                            "Evidencia1": _urlImagen1 ?? "",
+                            "Evidencia2": _urlImagen2 ?? "",
+                            "Evidencia3": _urlImagen3 ?? "",
+                            "Latitude": _posicionActual?.latitude.toString() ?? "",
+                            "Longitude": _posicionActual?.longitude.toString() ?? "",
+                            "NombreDriver": globalNombre ?? "SinNombre",
+                            "Nota": textoNota,
+                            "TimeStamp": DateTime.now().millisecondsSinceEpoch,
+                            "Parentesco": parentesco,
+                            "NombreRecibe": recibe,
+                            "YYYYMMDD": yyyyMMdd,
+                            "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
+                            "idDriver": globalUserId ?? "",
+                            "data": dataPayload,
+                          };
 
-                      final response = await http.post(
-                        Uri.parse(webhookUrl),
-                        headers: {HttpHeaders.contentTypeHeader: 'application/json'},
-                        body: jsonEncode(body),
-                      );
+                          try {
+                            const webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
 
-                      if (!mounted) return;
+                            final response = await http.post(
+                              Uri.parse(webhookUrl),
+                              headers: {HttpHeaders.contentTypeHeader: 'application/json'},
+                              body: jsonEncode(body),
+                            );
 
-                      if (response.statusCode == 200) {
-                        _snack('Información enviada exitosamente');
-                      } else {
-                        _snack('Error al enviar: ${response.body}');
-                      }
-                    } catch (e) {
-                      if (!mounted) return;
-                      _snack('Error de red: $e');
-                    }
+                            if (!mounted) return;
 
-                    if (mounted) Navigator.pop(context);
-                    // ---------- FIN LÓGICA ORIGINAL ----------
-                  },
+                            if (response.statusCode == 200) {
+                              _snack('Información enviada exitosamente');
+                            } else {
+                              _snack('Error al enviar: ${response.body}');
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            _snack('Error de red: $e');
+                          }
+
+                          if (mounted) Navigator.pop(context);
+                          // ---------- FIN LÓGICA ORIGINAL ----------
+                        }
+                      : null, // 👉 desactivado si no hay imagen
                   style: ElevatedButton.styleFrom(
                     backgroundColor: brand,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                     elevation: 0,
+                    // 🔒 Visual: reduce opacidad cuando esté deshabilitado
+                    disabledBackgroundColor: brand.withOpacity(0.35),
+                    disabledForegroundColor: Colors.white70,
                   ),
                   child: const Text('Guardar'),
                 ),

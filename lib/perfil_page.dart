@@ -5,6 +5,15 @@ import 'package:firebase_database/firebase_database.dart';
 // Usa las globals igual que en tus otras pantallas
 import 'login_page.dart' show globalNombre, globalUserId;
 
+// ===== NUEVO: imports para cambiar foto =====
+import 'dart:io' show File; // NUEVO
+import 'package:flutter/foundation.dart' show kIsWeb; // NUEVO
+import 'package:image_picker/image_picker.dart'; // NUEVO
+import 'package:permission_handler/permission_handler.dart'; // NUEVO
+import 'package:firebase_storage/firebase_storage.dart'; // NUEVO
+import 'package:path/path.dart' as p; // NUEVO
+// ===========================================
+
 class PerfilPage extends StatefulWidget {
   const PerfilPage({super.key});
 
@@ -30,6 +39,10 @@ class _PerfilPageState extends State<PerfilPage> {
 
   // Visor de imagen
   String? _viewerUrl;
+
+  // ===== NUEVO: estado de subida de foto =====
+  bool _subiendoFoto = false; // NUEVO
+  // ===========================================
 
   @override
   void initState() {
@@ -99,6 +112,167 @@ class _PerfilPageState extends State<PerfilPage> {
     );
   }
 
+  // =========================================================
+  // ============== CAMBIAR FOTO DE PERFIL (NUEVO) ===========
+  // =========================================================
+  Future<void> _cambiarFotoPerfil() async { // NUEVO
+    if (_subiendoFoto) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text('Cambiar foto de perfil',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const SizedBox(height: 6),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Seleccionar de galería'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _pickAndUpload(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Tomar foto'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _pickAndUpload(ImageSource.camera);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndUpload(ImageSource source) async { // NUEVO
+    try {
+      // Permisos (no aplica en Web)
+      if (!kIsWeb) {
+        if (source == ImageSource.camera) {
+          final cam = await Permission.camera.request();
+          if (!cam.isGranted) {
+            _toast('Permiso de cámara denegado');
+            return;
+          }
+        } else {
+          final gal = await Permission.photos.request();
+          if (!gal.isGranted && gal.isPermanentlyDenied == false) {
+            _toast('Permiso de galería denegado');
+            return;
+          }
+        }
+      }
+
+      final picker = ImagePicker();
+      final XFile? picked = await picker.pickImage(
+        source: source,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      await _subirFotoPerfil(picked);
+    } catch (e) {
+      _toast('No se pudo seleccionar la imagen: $e');
+    }
+  }
+
+  Future<void> _subirFotoPerfil(XFile picked) async { // NUEVO
+    if (_subiendoFoto) return;
+    setState(() => _subiendoFoto = true);
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _toast('Sesión no válida.');
+      setState(() => _subiendoFoto = false);
+      return;
+    }
+
+    final String uid = (globalUserId?.trim().isNotEmpty ?? false)
+        ? globalUserId!.trim()
+        : user.uid;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(const SnackBar(
+      content: Text('Subiendo foto...'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(days: 1),
+    ));
+
+    try {
+      final fileName = (picked.name.isNotEmpty ? picked.name : 'perfil.jpg')
+          .replaceAll(RegExp(r'\s+'), '_');
+      final safeName =
+          '${DateTime.now().millisecondsSinceEpoch}_${p.basename(fileName)}';
+
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('conductores_perfil')
+          .child(uid)
+          .child(safeName);
+
+      if (kIsWeb) {
+        final bytes = await picked.readAsBytes();
+        await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      } else {
+        await ref.putFile(
+          File(picked.path),
+          SettableMetadata(contentType: 'image/jpeg'),
+        );
+      }
+
+      final url = await ref.getDownloadURL();
+
+      final base =
+          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid';
+      await FirebaseDatabase.instance.ref('$base/Foto').set(url);
+
+      // Opcional: actualizar también FirebaseAuth
+      try {
+        await user.updatePhotoURL(url);
+      } catch (_) {}
+
+      setState(() {
+        _foto = url;
+        _subiendoFoto = false;
+      });
+
+      messenger.hideCurrentSnackBar();
+      _toast('Foto actualizada correctamente');
+    } catch (e) {
+      setState(() => _subiendoFoto = false);
+      messenger.hideCurrentSnackBar();
+      _toast('Error al subir la foto: $e');
+    }
+  }
+
+  void _toast(String msg) { // NUEVO
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
+    );
+  }
+  // =================== FIN FOTO PERFIL =====================
+
   @override
   Widget build(BuildContext context) {
     final conectado = _estadoConexion == 'Conectado';
@@ -147,15 +321,49 @@ class _PerfilPageState extends State<PerfilPage> {
                               ],
                             ),
                             const SizedBox(height: 8),
-                            CircleAvatar(
-                              radius: 36,
-                              backgroundImage:
-                                  _foto.isNotEmpty ? NetworkImage(_foto) : null,
-                              child: _foto.isEmpty
-                                  ? const Icon(Icons.person,
-                                      color: Colors.white, size: 36)
-                                  : null,
-                              backgroundColor: const Color(0xFF2A6AE8),
+
+                            // Avatar tocable + indicador de subida
+                            Stack(
+                              children: [
+                                InkWell(
+                                  onTap: _cambiarFotoPerfil,
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: CircleAvatar(
+                                    radius: 36,
+                                    backgroundImage:
+                                        _foto.isNotEmpty ? NetworkImage(_foto) : null,
+                                    child: _foto.isEmpty
+                                        ? const Icon(Icons.person,
+                                            color: Colors.white, size: 36)
+                                        : null,
+                                    backgroundColor: const Color(0xFF2A6AE8),
+                                  ),
+                                ),
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Colors.black26,
+                                          blurRadius: 3,
+                                        )
+                                      ],
+                                    ),
+                                    child: _subiendoFoto
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(6),
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.camera_alt, size: 16, color: Color(0xFF1955CC)),
+                                  ),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 12),
                             Text(
@@ -175,9 +383,9 @@ class _PerfilPageState extends State<PerfilPage> {
                             ),
                             const SizedBox(height: 8),
 
-                            // Píldora de estado (si dice "Descanso", se puede tocar para abrir el sheet)
+                            // Píldora de estado -> SIEMPRE abre Descansos
                             InkWell(
-                              onTap: conectado ? null : _openDescansosSheet,
+                              onTap: _openDescansosSheet, // MOD: antes dependía de 'conectado'
                               borderRadius: BorderRadius.circular(16),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
@@ -192,16 +400,15 @@ class _PerfilPageState extends State<PerfilPage> {
                                     width: 0.5,
                                   ),
                                 ),
-                                child: Text(
-                                  chipText,
-                                  style: TextStyle(
-                                    color: conectado
-                                        ? const Color(0xFF1955CC)
-                                        : Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
-                                  ),
-                                ),
+                           child: Text(
+  'Descansos',   // 🔹 SIEMPRE mostrará "Descansos"
+  style: TextStyle(
+    color: conectado ? const Color(0xFF1955CC) : Colors.white,
+    fontWeight: FontWeight.w600,
+    fontSize: 12,
+  ),
+),
+
                               ),
                             ),
                           ],
