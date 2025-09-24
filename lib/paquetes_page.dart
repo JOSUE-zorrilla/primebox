@@ -573,11 +573,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                     text: 'Recolectar en tienda',
                     onTap: _irARecolectarTiendas,
                   ),
-                  item(
-                    icon: Icons.route_outlined,
-                    text: 'Rutas disponibles',
-                    onTap: () => _proximamente('Rutas disponibles'),
-                  ),
+                  
                   item(
                     icon: Icons.group_add_outlined,
                     text: 'Delegar paquete',
@@ -616,6 +612,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
               ),
             ),
             const Divider(height: 1),
+            
             ListTile(
               leading: const Icon(Icons.logout, color: Color(0xFFE53935)),
               title: const Text(
@@ -727,18 +724,20 @@ class _PaquetesPageState extends State<PaquetesPage> {
                               ),
                               const SizedBox(width: 10),
                               // ESTE BOTÓN AHORA MUESTRA EL QR
-                              _SquareIconButton(icon: Icons.tune, onTap: _mostrarMiQR),
-                              const SizedBox(width: 10),
-                              _SquareIconButton(
-                                icon: Icons.grid_view_rounded,
-                                onTap: () async {
-                                  if (!_requerirConexion()) return;
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
-                                  );
-                                },
-                              ),
+                             // ESTE BOTÓN AHORA MUESTRA EL QR
+_SquareIconButton(icon: Icons.qr_code, onTap: _mostrarMiQR),
+const SizedBox(width: 10),
+_SquareIconButton(
+  icon: Icons.qr_code_scanner, // icono de escanear
+  onTap: () async {
+    if (!_requerirConexion()) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
+    );
+  },
+),
+
                             ],
                           ),
                         ],
@@ -772,7 +771,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                               child: Padding(
                                 padding: const EdgeInsets.all(24.0),
                                 child: Text(
-                                  'Revise que todos sus documentos estén Completo.\nEn caso de dudas póngase en contacto con soporte técnico.',
+                                  'Revise que todos sus documentos estén Completos.\nEn caso de dudas póngase en contacto con soporte técnico.',
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                     color: Color(0xFFE53935), // rojo
@@ -903,10 +902,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                   ],
                 ),
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: _cerrarSesion,
-          child: const Icon(Icons.logout),
-        ),
+        
       ),
     );
   }
@@ -926,11 +922,12 @@ class _SquareIconButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
-        child: const SizedBox(
-          width: 40,
-          height: 40,
-          child: Center(child: Icon(Icons.tune, color: Colors.white)), // icon se ignora visualmente
-        ),
+        child: SizedBox(
+  width: 40,
+  height: 40,
+  child: Center(child: Icon(icon, color: Colors.white)), // ahora sí usa el parámetro
+),
+
       ),
     );
   }

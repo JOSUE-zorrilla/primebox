@@ -51,14 +51,14 @@ class _RegisterPageState extends State<RegisterPage> {
     setState(() => _loadingCities = true);
     try {
       final ref = FirebaseDatabase.instance.ref(
-        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/AlmacenPicker',
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/idCiudades',
       );
       final snap = await ref.get();
 
       final List<CityOption> temporal = [];
       if (snap.exists && snap.children.isNotEmpty) {
         for (final c in snap.children) {
-          final nombre = c.child('NombreAlmacen').value?.toString() ?? '';
+          final nombre = c.child('NombreCiudad').value?.toString() ?? '';
           final id = c.key ?? '';
           if (id.isNotEmpty && nombre.isNotEmpty) {
             temporal.add(CityOption(id: id, nombre: nombre));

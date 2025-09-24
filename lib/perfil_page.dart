@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart'; // NUEVO
 import 'package:permission_handler/permission_handler.dart'; // NUEVO
 import 'package:firebase_storage/firebase_storage.dart'; // NUEVO
 import 'package:path/path.dart' as p; // NUEVO
+import 'package:intl/intl.dart'; // <<< NUEVO para formatear fecha
 // ===========================================
 
 class PerfilPage extends StatefulWidget {
@@ -273,10 +274,66 @@ class _PerfilPageState extends State<PerfilPage> {
   }
   // =================== FIN FOTO PERFIL =====================
 
+  // =================== BOTONES INFERIORES (NUEVO) =====================
+  Future<void> _logout() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/login');
+  }
+
+  Future<void> _eliminarCuenta() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _toast('No hay usuario autenticado.');
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirmación'),
+        content: const Text('¿Desea eliminar su cuenta ahora?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sí')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    final String soporteId = (globalUserId?.trim().isNotEmpty ?? false)
+        ? globalUserId!.trim()
+        : user.uid;
+
+    try {
+      final ticketsRef = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/TicketsDrivers',
+      ).push(); // ID automático
+
+      final fecha = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
+
+      await ticketsRef.set({
+        'Descripcion': 'Eliminar cuenta',
+        'Fecha': fecha,
+        'idSoporte': soporteId,
+        'idTicket': soporteId,
+      });
+
+      // después de guardar, cerrar sesión y enviar al login
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/login');
+    } catch (e) {
+      _toast('No se pudo crear el ticket: $e');
+    }
+  }
+  // ====================================================================
+
   @override
   Widget build(BuildContext context) {
     final conectado = _estadoConexion == 'Conectado';
-    final chipText = conectado ? 'Conectado' : 'Descanso';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF2F3F7),
@@ -385,7 +442,7 @@ class _PerfilPageState extends State<PerfilPage> {
 
                             // Píldora de estado -> SIEMPRE abre Descansos
                             InkWell(
-                              onTap: _openDescansosSheet, // MOD: antes dependía de 'conectado'
+                              onTap: _openDescansosSheet,
                               borderRadius: BorderRadius.circular(16),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
@@ -400,15 +457,14 @@ class _PerfilPageState extends State<PerfilPage> {
                                     width: 0.5,
                                   ),
                                 ),
-                           child: Text(
-  'Descansos',   // 🔹 SIEMPRE mostrará "Descansos"
-  style: TextStyle(
-    color: conectado ? const Color(0xFF1955CC) : Colors.white,
-    fontWeight: FontWeight.w600,
-    fontSize: 12,
-  ),
-),
-
+                                child: Text(
+                                  'Descansos',
+                                  style: TextStyle(
+                                    color: conectado ? const Color(0xFF1955CC) : Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -462,7 +518,46 @@ class _PerfilPageState extends State<PerfilPage> {
                                 url: _comprobanteDomicilio,
                                 onTap: _openViewer,
                               ),
+                              const SizedBox(height: 24),
+
+                              // ================== BOTONES ABAJO ==================
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: _logout,
+                                      icon: const Icon(Icons.logout),
+                                      label: const Text('Cerrar sesión'),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(vertical: 14),
+                                        side: const BorderSide(color: Color(0xFF1955CC)),
+                                        foregroundColor: const Color(0xFF1955CC),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _eliminarCuenta,
+                                      icon: const Icon(Icons.delete_outline),
+                                      label: const Text('Eliminar cuenta'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFE53935),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(vertical: 14),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               const SizedBox(height: 12),
+                              // ===================================================
                             ],
                           ),
                         ),
