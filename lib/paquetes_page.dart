@@ -53,9 +53,10 @@ class _PaquetesPageState extends State<PaquetesPage> {
   StreamSubscription<DatabaseEvent>? _paquetesSub;
   DatabaseReference? _paquetesRef;
 
-  // ===== NUEVO: datos del conductor para el Drawer (foto/nombre desde RTDB)
+  // ===== Datos del conductor para Drawer + Activo
   String _driverNombre = '';
   String _driverFoto = '';
+  bool _estaActivo = false; // <<<<<< NUEVO
   DatabaseReference? _conductorRef;
   StreamSubscription<DatabaseEvent>? _conductorSub;
 
@@ -65,19 +66,19 @@ class _PaquetesPageState extends State<PaquetesPage> {
     _searchController.addListener(_filtrarPaquetes);
     _escucharEstadoConexion();
     _suscribirsePaquetes();
-    _escucharPerfilConductor(); // <-- NUEVO
+    _escucharPerfilConductor(); // lee Nombre, Foto y Activo
   }
 
   @override
   void dispose() {
     _estadoConexionSub?.cancel();
     _paquetesSub?.cancel();
-    _conductorSub?.cancel(); // <-- NUEVO
+    _conductorSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  // ===== NUEVO: escucha cambios de Nombre/Foto en RTDB
+  // ===== Escucha cambios de Nombre/Foto/Activo en RTDB
   void _escucharPerfilConductor() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -90,10 +91,12 @@ class _PaquetesPageState extends State<PaquetesPage> {
       final snap = event.snapshot;
       final nombre = snap.child('Nombre').value?.toString() ?? '';
       final foto = snap.child('Foto').value?.toString() ?? '';
+      final activoStr = snap.child('Activo').value?.toString().toLowerCase() ?? 'no';
       if (mounted) {
         setState(() {
           _driverNombre = nombre;
           _driverFoto = foto;
+          _estaActivo = (activoStr == 'si'); // <<<<<< NUEVO
         });
       }
     });
@@ -189,7 +192,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
       if (mounted) setState(() => _estadoConexion = estado);
     });
 
-    _verificarActivo(user.uid);
+    _verificarActivo(user.uid); // establece el estado inicial
   }
 
   Future<void> _verificarActivo(String uid) async {
@@ -197,10 +200,9 @@ class _PaquetesPageState extends State<PaquetesPage> {
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid',
     );
     final snap = await ref.get();
-    final activo = snap.child('Activo').value?.toString().toLowerCase() ?? 'no';
-    if (activo != 'si' && mounted) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const PerfilPage()));
-    }
+    final activoStr = snap.child('Activo').value?.toString().toLowerCase() ?? 'no';
+    if (mounted) setState(() => _estaActivo = (activoStr == 'si')); // <<<<<< NUEVO
+    // ya NO navegamos a PerfilPage aquí
   }
 
   // =============== Ubicación ===============
@@ -588,7 +590,6 @@ class _PaquetesPageState extends State<PaquetesPage> {
                         context,
                         MaterialPageRoute(builder: (_) => const DelegarPaquetePage()),
                       );
-                      // No necesitamos manejar el código aquí; el flujo continúa en las pantallas de delegación
                     },
                   ),
                   item(
@@ -744,7 +745,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
                       ),
                     ),
 
-                    // Píldora con contador
+                    // Píldora con contador (si no está activo, mostramos 0)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                       child: Align(
@@ -757,132 +758,147 @@ class _PaquetesPageState extends State<PaquetesPage> {
                             boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
                           ),
                           child: Text(
-                            'Número de paquetes: $_cantidadPaquetes',
+                            'Número de paquetes: ${_estaActivo ? _cantidadPaquetes : 0}',
                             style: const TextStyle(color: Color(0xFF1A3365), fontWeight: FontWeight.w600),
                           ),
                         ),
                       ),
                     ),
 
-                    // Lista de paquetes
+                    // Contenido principal
                     Expanded(
-                      child: _paquetesFiltrados.isEmpty
-                          ? const Center(child: Text('No hay paquetes disponibles'))
-                          : ListView.builder(
-                              padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                              itemCount: _paquetesFiltrados.length,
-                              itemBuilder: (context, index) {
-                                final paquete = _paquetesFiltrados[index];
-                                final tipoEnvio = paquete['TipoEnvio'];
-                                final bool esEspecial = tipoEnvio == 'HD0D' || tipoEnvio == 'HD1D';
+                      child: !_estaActivo
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24.0),
+                                child: Text(
+                                  'Revise que todos sus documentos estén Completo.\nEn caso de dudas póngase en contacto con soporte técnico.',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Color(0xFFE53935), // rojo
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : (_paquetesFiltrados.isEmpty
+                              ? const Center(child: Text('No hay paquetes disponibles'))
+                              : ListView.builder(
+                                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                                  itemCount: _paquetesFiltrados.length,
+                                  itemBuilder: (context, index) {
+                                    final paquete = _paquetesFiltrados[index];
+                                    final tipoEnvio = paquete['TipoEnvio'];
+                                    final bool esEspecial = tipoEnvio == 'HD0D' || tipoEnvio == 'HD1D';
 
-                                return _PaqueteCard(
-                                  id: paquete['id'],
-                                  direccion: paquete['DireccionEntrega'],
-                                  destinatario: paquete['Destinatario'],
-                                  intentos: paquete['Intentos'],
-                                  tipoEnvio: tipoEnvio,
-                                  esEspecial: esEspecial,
-                                  onEntregar: () async {
-                                    if (!_requerirConexion()) return;
-                                    final user = FirebaseAuth.instance.currentUser;
-                                    if (user == null) return;
+                                    return _PaqueteCard(
+                                      id: paquete['id'],
+                                      direccion: paquete['DireccionEntrega'],
+                                      destinatario: paquete['Destinatario'],
+                                      intentos: paquete['Intentos'],
+                                      tipoEnvio: tipoEnvio,
+                                      esEspecial: esEspecial,
+                                      onEntregar: () async {
+                                        if (!_requerirConexion()) return;
+                                        final user = FirebaseAuth.instance.currentUser;
+                                        if (user == null) return;
 
-                                    final paqueteRef = FirebaseDatabase.instance.ref(
-                                      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/${paquete['id']}',
-                                    );
-
-                                    final snap = await paqueteRef.get();
-                                    final tnReference =
-                                        snap.child('TnReference').value?.toString() ?? 'Sin referencia';
-                                    final telefono = snap.child('Telefono').value?.toString() ?? '';
-                                    final notificarRp = snap.child('NotificarRp').value?.toString() ?? '';
-
-                                    if (notificarRp.toLowerCase() == 'si') {
-                                      try {
-                                        await _enviarWebhookRP(
-                                          paqueteId: paquete['id'],
-                                          tnReference: tnReference,
+                                        final paqueteRef = FirebaseDatabase.instance.ref(
+                                          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/${paquete['id']}',
                                         );
-                                      } catch (e) {
-                                        if (mounted) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Error al enviar webhook de entrega: $e')),
-                                          );
+
+                                        final snap = await paqueteRef.get();
+                                        final tnReference =
+                                            snap.child('TnReference').value?.toString() ?? 'Sin referencia';
+                                        final telefono = snap.child('Telefono').value?.toString() ?? '';
+                                        final notificarRp = snap.child('NotificarRp').value?.toString() ?? '';
+
+                                        if (notificarRp.toLowerCase() == 'si') {
+                                          try {
+                                            await _enviarWebhookRP(
+                                              paqueteId: paquete['id'],
+                                              tnReference: tnReference,
+                                            );
+                                          } catch (e) {
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(content: Text('Error al enviar webhook de entrega: $e')),
+                                              );
+                                            }
+                                          } finally {
+                                            await _limpiarNotificarRp(
+                                              userId: user.uid,
+                                              paqueteId: paquete['id'],
+                                            );
+                                          }
                                         }
-                                      } finally {
-                                        await _limpiarNotificarRp(
-                                          userId: user.uid,
-                                          paqueteId: paquete['id'],
-                                        );
-                                      }
-                                    }
 
-                                    if (!mounted) return;
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PaqueteDetallePage(
-                                          id: paquete['id'],
-                                          telefono: telefono,
-                                          destinatario: paquete['Destinatario'],
-                                          tnReference: tnReference,
-                                        ),
-                                      ),
+                                        if (!mounted) return;
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => PaqueteDetallePage(
+                                              id: paquete['id'],
+                                              telefono: telefono,
+                                              destinatario: paquete['Destinatario'],
+                                              tnReference: tnReference,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      onRechazar: () async {
+                                        if (!_requerirConexion()) return;
+                                        final user = FirebaseAuth.instance.currentUser;
+                                        if (user == null) return;
+
+                                        final paqueteId = paquete['id'];
+                                        final paqueteRef = FirebaseDatabase.instance.ref(
+                                          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
+                                        );
+
+                                        final snapshot = await paqueteRef.get();
+                                        final tnReference = snapshot.child('TnReference').value?.toString() ?? '';
+                                        final telefono = snapshot.child('Telefono').value?.toString() ?? '';
+
+                                        try {
+                                          await _enviarWebhookRP(paqueteId: paqueteId, tnReference: tnReference);
+                                        } catch (e) {
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Error al enviar webhook de rechazo: $e')),
+                                            );
+                                          }
+                                        } finally {
+                                          await _limpiarNotificarRp(userId: user.uid, paqueteId: paqueteId);
+                                        }
+
+                                        final intentosRaw = snapshot.child('Intentos').value;
+                                        final int intentos = intentosRaw is int
+                                            ? intentosRaw
+                                            : int.tryParse(intentosRaw.toString()) ?? 0;
+
+                                        if (intentos >= 3) {
+                                          _mostrarAlertaDevolucion();
+                                          return;
+                                        }
+
+                                        if (!mounted) return;
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => EntregaFallidaPage(
+                                              telefono: telefono,
+                                              tnReference: tnReference,
+                                              destinatario: paquete['Destinatario'],
+                                              paqueteId: paqueteId, // << importante
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     );
                                   },
-                                  onRechazar: () async {
-                                    if (!_requerirConexion()) return;
-                                    final user = FirebaseAuth.instance.currentUser;
-                                    if (user == null) return;
-
-                                    final paqueteId = paquete['id'];
-                                    final paqueteRef = FirebaseDatabase.instance.ref(
-                                      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$paqueteId',
-                                    );
-
-                                    final snapshot = await paqueteRef.get();
-                                    final tnReference = snapshot.child('TnReference').value?.toString() ?? '';
-                                    final telefono = snapshot.child('Telefono').value?.toString() ?? '';
-
-                                    try {
-                                      await _enviarWebhookRP(paqueteId: paqueteId, tnReference: tnReference);
-                                    } catch (e) {
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('Error al enviar webhook de rechazo: $e')),
-                                        );
-                                      }
-                                    } finally {
-                                      await _limpiarNotificarRp(userId: user.uid, paqueteId: paqueteId);
-                                    }
-
-                                    final intentosRaw = snapshot.child('Intentos').value;
-                                    final int intentos = intentosRaw is int
-                                        ? intentosRaw
-                                        : int.tryParse(intentosRaw.toString()) ?? 0;
-
-                                    if (intentos >= 3) {
-                                      _mostrarAlertaDevolucion();
-                                      return;
-                                    }
-
-                                    if (!mounted) return;
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => EntregaFallidaPage(
-                                          telefono: telefono,
-                                          tnReference: tnReference,
-                                          destinatario: paquete['Destinatario'],
-                                          paqueteId: paqueteId, // << importante
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
+                                )),
                     ),
                   ],
                 ),

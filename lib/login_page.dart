@@ -3,8 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
-import 'centro_boot_page.dart';
 
+import 'centro_boot_page.dart';
+import 'register_page.dart';
 
 // ✅ Variables globales
 String? globalUserId;
@@ -17,8 +18,6 @@ const Color kTitle = Color(0xFF0F285C);
 const Color kPrimaryBlue300 = Color(0xFF64B5F6);
 const Color kUnderline = Color(0xFFBDBDBD);
 const Color kHint = Color(0x99000000);
-
-
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -56,7 +55,7 @@ class _LoginPageState extends State<LoginPage> {
 
         if (!mounted) return;
 
-        // 👉 NUEVO: ir a cargar centro antes de paquetes
+        // 👉 ir a cargar centro antes de paquetes si hay ciudad
         if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
           Navigator.pushReplacement(
             context,
@@ -112,7 +111,6 @@ class _LoginPageState extends State<LoginPage> {
 
         if (!mounted) return;
 
-        // 👉 NUEVO: ir a cargar centro antes de paquetes
         if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
           Navigator.pushReplacement(
             context,
@@ -137,7 +135,7 @@ class _LoginPageState extends State<LoginPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
       );
-    } catch (e) {
+    } catch (_) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Error de conexión o datos inválidos')),
       );
@@ -298,7 +296,12 @@ class _LoginPageState extends State<LoginPage> {
                                     .copyWith(color: Colors.black54),
                               ),
                               GestureDetector(
-                                onTap: () {},
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const RegisterPage()),
+                                  );
+                                },
                                 child: Text(
                                   'Registrarte',
                                   style: (labelMedium ?? const TextStyle()).copyWith(
