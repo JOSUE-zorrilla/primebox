@@ -68,6 +68,15 @@ class _FallidasMultiEntregaPageState extends State<FallidasMultiEntregaPage> {
       final idPB = await _resolveToIdPB(raw);
       if (idPB != null) {
         await _validarYAgregarGuiaFallida(idPB, alreadyIdPB: true);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ No se pudo resolver la guía inicial'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }

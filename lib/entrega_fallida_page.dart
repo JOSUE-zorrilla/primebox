@@ -160,51 +160,51 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
   }
 
   // Subida con compresión y metadata correcta
-  Future<void> _subirImagenAFirebase(File image) async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Cargando imagen…'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(days: 1),
-      ),
+// Subida con compresión y UN solo mensaje de 2s
+Future<void> _subirImagenAFirebase(File image) async {
+  final messenger = ScaffoldMessenger.of(context);
+
+  // Quita cualquier snackbar previo y muestra uno único de 2s
+  messenger.removeCurrentSnackBar();
+  messenger.showSnackBar(
+    const SnackBar(
+      content: Text('Subiendo imagen...'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 2),
+    ),
+  );
+
+  try {
+    // === COMPRESIÓN ===
+    final Uint8List compressed = await _compressImage(image);
+
+    // Nombre legible (forzamos .jpg)
+    final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child('imagenesfallidas')
+        .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
+
+    // Subimos bytes comprimidos con contentType correcto
+    await ref.putData(
+      compressed,
+      SettableMetadata(contentType: 'image/jpeg'),
     );
-    try {
-      // === COMPRESIÓN ===
-      final Uint8List compressed = await _compressImage(image);
 
-      // Nombre legible (y forzamos extensión .jpg)
-      final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('imagenesfallidas')
-          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
+    final url = await ref.getDownloadURL();
 
-      // Subimos bytes comprimidos con contentType correcto
-      await ref.putData(
-        compressed,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-
-      final url = await ref.getDownloadURL();
-
-      setState(() {
-        _imagenes[0] = image; // mantenemos referencia al File (por si la necesitas)
-        _previewJpeg = compressed; // mostramos preview comprimido
-        _urlImagen = url;          // <<< Esto activa el botón Guardar
-      });
-
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Imagen subida correctamente')),
-      );
-    } catch (e) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text('Error al subir imagen: $e')),
-      );
-    }
+    setState(() {
+      _imagenes[0] = image;     // mantener referencia al File
+      _previewJpeg = compressed; // preview de lo realmente subido
+      _urlImagen = url;          // activa el botón Guardar
+    });
+  } catch (e) {
+    // Sin SnackBars extra: no mostramos nada más.
+    // Si quieres registrar errores para debug:
+    // debugPrint('Error al subir imagen: $e');
   }
+}
+
 
   void _llamar() async {
     final tel = _normalizePhone(widget.telefono, forWhatsApp: false);
@@ -221,73 +221,29 @@ class _EntregaFallidaPageState extends State<EntregaFallidaPage> {
     }
   }
 
-  void _enviarWhatsApp() async {
-    final String mensaje = 'Hola...';
-    final String telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+void _enviarWhatsApp() async {
+  final String mensaje = 'Hola...';
 
-    try {
-      // 1) Validación de número (solo dígitos, 7–15)
-      if (!RegExp(r'^\d{7,15}$').hasMatch(telefonoWa)) {
-        throw 'Número inválido. Debe tener solo dígitos (7–15). Recibido: "$telefonoWa".';
-      }
+  // Normaliza igual que ya haces: sin '+' para WhatsApp
+  final String tel = _normalizePhone(widget.telefono, forWhatsApp: true);
 
-      // 2) URIs
-      final Uri uriWaMe = Uri.parse(
-        'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
-      );
-      final Uri uriNative = Uri.parse(
-        'whatsapp://send?phone=$telefonoWa&text=${Uri.encodeComponent(mensaje)}',
-      );
-
-      // 3) WEB: solo podemos abrir wa.me
-      if (kIsWeb) {
-        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
-        if (!ok) {
-          throw 'No se pudo abrir el enlace wa.me en el navegador.';
-        }
-        return;
-      }
-
-      // 4) NATIVO: intentar app primero
-      bool intentadoNativo = false;
-      try {
-        final puedeNativo = await canLaunchUrl(uriNative);
-        if (puedeNativo) {
-          intentadoNativo = true;
-          final ok = await launchUrl(uriNative, mode: LaunchMode.externalApplication);
-          if (!ok) {
-            throw 'La app de WhatsApp no respondió al intento de apertura.';
-          }
-          return; // Listo
-        }
-      } catch (e) {
-        throw 'Error al invocar la app de WhatsApp: $e';
-      }
-
-      // 5) Fallback a wa.me
-      final puedeWeb = await canLaunchUrl(uriWaMe);
-      if (puedeWeb) {
-        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
-        if (!ok) {
-          throw 'No se pudo abrir el enlace wa.me en el navegador.';
-        }
-        return;
-      }
-
-      // 6) Explicación si nada funcionó
-      String razon = 'No fue posible abrir WhatsApp ni el enlace web. ';
-      if (!intentadoNativo) {
-        razon += 'Posible causa: WhatsApp no está instalado o el sistema bloqueó la intención.';
-      } else {
-        razon += 'Posible causa: el sistema bloqueó la apertura o no hay navegador disponible.';
-      }
-      throw razon;
-    } on FormatException catch (e) {
-      _snack('Número/URI con formato inválido: $e');
-    } catch (e) {
-      _snack('No se pudo abrir WhatsApp: $e');
-    }
+  // Valida que tenga solo dígitos y longitud razonable (7–15)
+  if (!RegExp(r'^\d{7,15}$').hasMatch(tel)) {
+    _snack('Número inválido. Incluye código de país y solo dígitos. Recibido: "$tel"');
+    return;
   }
+
+  final Uri uriWa = Uri.parse(
+    'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}',
+  );
+
+  final ok = await launchUrl(uriWa, mode: LaunchMode.externalApplication);
+  if (!ok) {
+    _snack('No se pudo abrir WhatsApp.');
+  }
+}
+
+  
 
   Future<void> _tomarFotografia() async {
     final status = await Permission.camera.request();

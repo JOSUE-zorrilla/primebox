@@ -48,6 +48,9 @@ dependencies:
   webview_flutter: ^4.8.0
   flutter_image_compress: ^2.3.0
   qr_flutter: ^4.1.0  
+  file_picker: ^8.0.0
+  mime: ^1.0.5
+  
 
   
 
@@ -83,6 +86,8 @@ flutter:
     - assets/images/primebox_logo.png
     - assets/images/default.png
     - assets/images/truck_illustration.png
+    - assets/sound/sonido.mp3
+    - assets/sound/sonidoerror.mp3
 
   # To add assets to your application, add an assets section, like this:
   # assets:

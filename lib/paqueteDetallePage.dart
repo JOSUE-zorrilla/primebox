@@ -139,76 +139,26 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
-  Future<void> _enviarWhatsApp() async {
-    final String mensaje = 'Hola...';
-    final String telefonoWa = _normalizePhone(widget.telefono, forWhatsApp: true);
+Future<void> _enviarWhatsApp() async {
+  final String mensaje = 'Hola...';
 
-    try {
-      // 1) Validación de número
-      if (!RegExp(r'^\d{7,15}$').hasMatch(telefonoWa)) {
-        throw 'Número inválido. Debe contener solo dígitos (7–15). Valor recibido: "$telefonoWa".';
-      }
+  // Quita separadores y el '+'; wa.me exige SOLO dígitos en formato internacional
+  String tel = _normalizePhone(widget.telefono, forWhatsApp: true);
 
-      // 2) Construcción de URIs
-      final Uri uriWaMe = Uri.parse(
-        'https://wa.me/$telefonoWa?text=${Uri.encodeComponent(mensaje)}',
-      );
-      final Uri uriNative = Uri.parse(
-        'whatsapp://send?phone=$telefonoWa&text=${Uri.encodeComponent(mensaje)}',
-      );
-
-      // 3) Flujo por plataforma
-      if (kIsWeb) {
-        // En web solo podemos abrir wa.me
-        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
-        if (!ok) {
-          throw 'No se pudo abrir el enlace web (wa.me). Verifica que el navegador permita abrir pestañas externas.';
-        }
-        return;
-      }
-
-      // 4) En Android/iOS intentamos primero el esquema nativo (app instalada)
-      bool intentadoNativo = false;
-
-      try {
-        final puedeNativo = await canLaunchUrl(uriNative);
-        if (puedeNativo) {
-          intentadoNativo = true;
-          final ok = await launchUrl(uriNative, mode: LaunchMode.externalApplication);
-          if (!ok) {
-            throw 'La app de WhatsApp no respondió al intento de apertura.';
-          }
-          return; // Listo
-        }
-      } catch (e) {
-        // canLaunch/launch pueden lanzar PlatformException en algunos OEMs
-        throw 'Error al invocar la app de WhatsApp: $e';
-      }
-
-      // 5) Fallback: abrir wa.me en navegador
-      final puedeWeb = await canLaunchUrl(uriWaMe);
-      if (puedeWeb) {
-        final ok = await launchUrl(uriWaMe, mode: LaunchMode.externalApplication);
-        if (!ok) {
-          throw 'No se pudo abrir el enlace wa.me en el navegador.';
-        }
-        return;
-      }
-
-      // 6) Si llegamos aquí, explicamos la razón probable
-      String razon = 'No fue posible abrir WhatsApp ni el enlace web. ';
-      if (!intentadoNativo) {
-        razon += 'Parece que WhatsApp no está instalado o el dispositivo bloqueó la intención.';
-      } else {
-        razon += 'El sistema bloqueó la apertura o no hay navegador disponible.';
-      }
-      throw razon;
-    } on FormatException catch (e) {
-      _snack('Número/URI con formato inválido: $e');
-    } catch (e) {
-      _snack('No se pudo abrir WhatsApp: $e');
-    }
+  // Valida que tenga de 7 a 15 dígitos
+  if (!RegExp(r'^\d{7,15}$').hasMatch(tel)) {
+    _snack('Número inválido. Debe incluir el código de país y solo dígitos. Recibido: "$tel"');
+    return;
   }
+
+  final uriWa = Uri.parse(
+    'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}',
+  );
+
+  final ok = await launchUrl(uriWa, mode: LaunchMode.externalApplication);
+  if (!ok) _snack('No se pudo abrir WhatsApp.');
+}
+
 
   // ===== COMPRESIÓN =====
 
@@ -304,67 +254,58 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   }
 
   // ---- NUEVO: subida comprimida ----
-  Future<void> _subirImagenAFirebase(File image, int index) async {
-    final messenger = ScaffoldMessenger.of(context);
+// ---- Subida comprimida con UN solo SnackBar de 2s ----
+Future<void> _subirImagenAFirebase(File image, int index) async {
+  final messenger = ScaffoldMessenger.of(context);
 
-    messenger.clearSnackBars(); // evita acumular mensajes previos
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('La imagen se está cargando…'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(days: 1), // se oculta al finalizar
-      ),
+  // Un único mensaje de 2s apenas inicia la acción
+  messenger.clearSnackBars();
+  messenger.showSnackBar(
+    const SnackBar(
+      content: Text('Cargando imagen...'),
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 2),
+    ),
+  );
+
+  try {
+    // 1) Comprimir a JPEG
+    final Uint8List compressed = await _compressImage(image);
+
+    // 2) Subir a Firebase Storage con putData (bytes) y metadata
+    final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child('imagenesaplicacion')
+        .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
+
+    await ref.putData(
+      compressed,
+      SettableMetadata(contentType: 'image/jpeg'),
     );
 
-    try {
-      // 1) Comprimir a JPEG
-      final Uint8List compressed = await _compressImage(image);
+    final url = await ref.getDownloadURL();
 
-      // 2) Subir a Firebase Storage con putData (bytes) y metadata
-      final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('imagenesaplicacion')
-          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
+    // 3) Actualizar estado: file local + preview comprimido + URL
+    if (!mounted) return;
+    setState(() {
+      _imagenes[index] = image;
+      _previewsComprimidos[index] = compressed;
 
-      await ref.putData(
-        compressed,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-
-      final url = await ref.getDownloadURL();
-
-      // 3) Actualizar estado: guardamos file y el preview comprimido
-      setState(() {
-        _imagenes[index] = image;
-        _previewsComprimidos[index] = compressed;
-
-        if (index == 0) {
-          _urlImagen1 = url;
-        } else if (index == 1) {
-          _urlImagen2 = url;
-        } else {
-          _urlImagen3 = url;
-        }
-      });
-
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Imagen subida correctamente'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Error al subir imagen: $e'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+      if (index == 0) {
+        _urlImagen1 = url;
+      } else if (index == 1) {
+        _urlImagen2 = url;
+      } else {
+        _urlImagen3 = url;
+      }
+    });
+  } catch (e) {
+    // No mostramos SnackBars adicionales aunque haya error (requisito del usuario).
+    // Si quieres, deja un log para depurar:
+    // debugPrint('Error al subir imagen: $e');
   }
+}
 
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));

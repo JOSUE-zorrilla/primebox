@@ -361,17 +361,17 @@ class GuiaEncontradaPage extends StatelessWidget {
 
                     if (!context.mounted) return;
                    Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => EntregaFallidaPage(
-      telefono: telefono,
-      tnReference: tnReference,
-      destinatario: data.nombreDestinatario,
-      // ✅ usa el id del registro que ya tienes en tu modelo
-      paqueteId: data.id,
-    ),
-  ),
-);
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EntregaFallidaPage(
+                        telefono: telefono,
+                        tnReference: tnReference,
+                        destinatario: data.nombreDestinatario,
+                        // ✅ usa el id del registro que ya tienes en tu modelo
+                        paqueteId: data.id,
+                      ),
+                    ),
+                  );
 
 
                   } catch (e) {

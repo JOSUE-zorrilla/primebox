@@ -13,7 +13,6 @@ class MultiGuiasPage extends StatefulWidget {
   State<MultiGuiasPage> createState() => _MultiGuiasPageState();
 }
 
-
 class _MultiGuiasPageState extends State<MultiGuiasPage> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? controller;
@@ -21,46 +20,56 @@ class _MultiGuiasPageState extends State<MultiGuiasPage> {
   final TextEditingController _manualController = TextEditingController();
   bool _permissionGranted = false;
 
-  @override
-void initState() {
-  super.initState();
-  _checkCameraPermission();
-}
+  // Para evitar disparos duplicados muy rápidos del escáner
+  bool _busyScan = false;
 
-/// Modifica tu _checkCameraPermission para cargar initialGuias cuando termine
-Future<void> _checkCameraPermission() async {
-  var status = await Permission.camera.status;
-  if (!status.isGranted) {
-    status = await Permission.camera.request();
+  @override
+  void initState() {
+    super.initState();
+    _checkCameraPermission();
   }
 
-  setState(() {
-    _permissionGranted = status.isGranted;
-  });
+  /// Modifica tu _checkCameraPermission para cargar initialGuias cuando termine
+  Future<void> _checkCameraPermission() async {
+    var status = await Permission.camera.status;
+    if (!status.isGranted) {
+      status = await Permission.camera.request();
+    }
 
-  // 👇 Precarga las guías iniciales (si las hay)
-  if (widget.initialGuias != null && widget.initialGuias!.isNotEmpty) {
-    for (final raw in widget.initialGuias!) {
-      final id = raw.trim();
-      if (id.isEmpty) continue;
-      // Usa el mismo flujo de validación para consistencia
-      // (si prefieres “forzar” sin validar, puedes hacer guias.add(id) directo)
-      _validarYAgregarGuia(id);
+    setState(() {
+      _permissionGranted = status.isGranted;
+    });
+
+    // 👇 Precarga las guías iniciales (si las hay)
+    if (widget.initialGuias != null && widget.initialGuias!.isNotEmpty) {
+      for (final raw in widget.initialGuias!) {
+        final id = raw.trim();
+        if (id.isEmpty) continue;
+        await _validarYAgregarGuia(id, fromPreload: true);
+      }
     }
   }
-}
-
 
   void _onQRViewCreated(QRViewController controller) {
     this.controller = controller;
-    controller.scannedDataStream.listen((scanData) {
+    controller.scannedDataStream.listen((scanData) async {
+      if (_busyScan) return;
+      _busyScan = true;
       final code = scanData.code ?? '';
-      _validarYAgregarGuia(code);
+      await _validarYAgregarGuia(code);
+      _busyScan = false;
     });
   }
 
-  Future<void> _validarYAgregarGuia(String id) async {
-    if (guias.contains(id)) return;
+  Future<void> _validarYAgregarGuia(String id, {bool fromPreload = false}) async {
+    if (id.trim().isEmpty) {
+      return;
+    }
+
+    if (guias.contains(id)) {
+      // ya estaba, lo ignoramos
+      return;
+    }
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -69,17 +78,28 @@ Future<void> _checkCameraPermission() async {
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/RepartoDriver/${user.uid}/Paquetes/$id',
     );
 
-    final snapshot = await ref.get();
+    try {
+      final snapshot = await ref.get();
 
-    if (snapshot.exists) {
-      setState(() {
-        guias.add(id);
-      });
-    } else {
-      if (mounted) {
+      if (snapshot.exists) {
+        setState(() {
+          guias.add(id);
+        });
+      } else {
+        if (mounted && !fromPreload) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Paquete no asignado'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted && !fromPreload) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('❌ Paquete no asignado'),
+          SnackBar(
+            content: Text('Error consultando RTDB: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -140,6 +160,7 @@ Future<void> _checkCameraPermission() async {
                             hintText: 'Ingresar ID manualmente',
                             border: OutlineInputBorder(),
                           ),
+                          onSubmitted: (_) => _agregarGuiaManual(), // opcional
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -154,8 +175,10 @@ Future<void> _checkCameraPermission() async {
                   ),
                 ),
                 const SizedBox(height: 10),
-                const Text('📋 Guías escaneadas:',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  '📋 Guías escaneadas:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 10),
                 Expanded(
                   child: ListView.builder(

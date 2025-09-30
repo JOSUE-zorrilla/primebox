@@ -26,45 +26,48 @@ class _RecogerAlmacenPageState extends State<RecogerAlmacenPage> {
   }
 
   Future<void> _cargarAlmacenes() async {
-    try {
-      final ciudad = (globalIdCiudad ?? '').trim();
-      final ref = FirebaseDatabase.instance.ref(
-        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/AlmacenPicker',
-      );
+  try {
+    final ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/AlmacenPicker',
+    );
 
-      final snap = await ref.get();
-      final List<Map<String, dynamic>> lista = [];
+    final snap = await ref.get();
+    final List<Map<String, dynamic>> lista = [];
 
-      if (snap.exists && snap.value is Map) {
-        final value = snap.value as Map;
-        value.forEach((key, raw) {
-          if (raw is Map) {
-            final idCiudad = (raw['idCiudad'] ?? '').toString().trim();
-            if (ciudad.isEmpty || idCiudad == ciudad) {
-              lista.add({
-                'id': key.toString(),
-                'NombreAlmacen': raw['NombreAlmacen']?.toString() ?? 'Sin nombre',
-                'Direccion': raw['Direccion']?.toString() ?? 'Sin dirección',
-                // OJO: ya NO leemos idFirma de la tabla
-              });
-            }
-          }
-        });
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _almacenes = lista;
-        _loading = false;
+    if (snap.exists && snap.value is Map) {
+      final value = snap.value as Map;
+      value.forEach((key, raw) {
+        if (raw is Map) {
+          // CARGAR TODO: ya NO filtramos por idCiudad
+          lista.add({
+            'id': key.toString(),
+            'NombreAlmacen': raw['NombreAlmacen']?.toString() ?? 'Sin nombre',
+            'Direccion': raw['Direccion']?.toString() ?? 'Sin dirección',
+            // OJO: seguimos sin leer idFirma de la tabla
+          });
+        }
       });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudieron cargar los almacenes: $e')),
-      );
+
+      // (Opcional) ordena por nombre para mostrar consistente
+      lista.sort((a, b) =>
+          (a['NombreAlmacen'] as String).toLowerCase().compareTo(
+              (b['NombreAlmacen'] as String).toLowerCase()));
     }
+
+    if (!mounted) return;
+    setState(() {
+      _almacenes = lista;
+      _loading = false;
+    });
+  } catch (e) {
+    if (!mounted) return;
+    setState(() => _loading = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('No se pudieron cargar los almacenes: $e')),
+    );
   }
+}
+
 
   @override
   Widget build(BuildContext context) {

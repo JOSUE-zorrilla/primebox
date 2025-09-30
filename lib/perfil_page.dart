@@ -5,14 +5,19 @@ import 'package:firebase_database/firebase_database.dart';
 // Usa las globals igual que en tus otras pantallas
 import 'login_page.dart' show globalNombre, globalUserId;
 
-// ===== NUEVO: imports para cambiar foto =====
-import 'dart:io' show File; // NUEVO
-import 'package:flutter/foundation.dart' show kIsWeb; // NUEVO
-import 'package:image_picker/image_picker.dart'; // NUEVO
-import 'package:permission_handler/permission_handler.dart'; // NUEVO
-import 'package:firebase_storage/firebase_storage.dart'; // NUEVO
-import 'package:path/path.dart' as p; // NUEVO
-import 'package:intl/intl.dart'; // <<< NUEVO para formatear fecha
+// ===== NUEVO: imports para cambiar foto y subir docs =====
+import 'dart:io' show File;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';            // << NUEVO
+import 'package:permission_handler/permission_handler.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:path/path.dart' as p;
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';          // << NUEVO
+import 'package:mime/mime.dart';                           // << NUEVO
+import 'dart:typed_data' show Uint8List;
+
 // ===========================================
 
 class PerfilPage extends StatefulWidget {
@@ -32,7 +37,7 @@ class _PerfilPageState extends State<PerfilPage> {
   String _telefono = '';
   String _estadoConexion = 'Desconectado';
 
-  // Campos de imagen (URLs)
+  // Campos de imagen/documento (URLs)
   String _ineFrente = '';
   String _ineAtras = '';
   String _cartaAntecedentes = '';
@@ -41,9 +46,16 @@ class _PerfilPageState extends State<PerfilPage> {
   // Visor de imagen
   String? _viewerUrl;
 
-  // ===== NUEVO: estado de subida de foto =====
-  bool _subiendoFoto = false; // NUEVO
-  // ===========================================
+  // Estado de subida
+  bool _subiendoFoto = false;
+
+  // NUEVO: progreso por campo de documento
+  final Map<String, bool> _subiendoCampo = {
+    'IneFrente': false,
+    'IneAtras': false,
+    'CartaAntecedentes': false,
+    'ComprobanteDomicilio': false,
+  };
 
   @override
   void initState() {
@@ -97,8 +109,20 @@ class _PerfilPageState extends State<PerfilPage> {
     }
   }
 
-  void _openViewer(String url) {
-    if (url.isNotEmpty) setState(() => _viewerUrl = url);
+  void _openViewer(String url) async {
+    if (url.isEmpty) return;
+    // Si es PDF -> abrir con navegador/visor externo
+    if (_isPdfUrl(url)) {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _toast('No se pudo abrir el documento.');
+      }
+      return;
+    }
+    // Si es imagen -> visor interno
+    setState(() => _viewerUrl = url);
   }
 
   void _closeViewer() => setState(() => _viewerUrl = null);
@@ -114,9 +138,9 @@ class _PerfilPageState extends State<PerfilPage> {
   }
 
   // =========================================================
-  // ============== CAMBIAR FOTO DE PERFIL (NUEVO) ===========
+  // ============== CAMBIAR FOTO DE PERFIL ===================
   // =========================================================
-  Future<void> _cambiarFotoPerfil() async { // NUEVO
+  Future<void> _cambiarFotoPerfil() async {
     if (_subiendoFoto) return;
     showModalBottomSheet(
       context: context,
@@ -163,7 +187,7 @@ class _PerfilPageState extends State<PerfilPage> {
     );
   }
 
-  Future<void> _pickAndUpload(ImageSource source) async { // NUEVO
+  Future<void> _pickAndUpload(ImageSource source) async {
     try {
       // Permisos (no aplica en Web)
       if (!kIsWeb) {
@@ -197,7 +221,7 @@ class _PerfilPageState extends State<PerfilPage> {
     }
   }
 
-  Future<void> _subirFotoPerfil(XFile picked) async { // NUEVO
+  Future<void> _subirFotoPerfil(XFile picked) async {
     if (_subiendoFoto) return;
     setState(() => _subiendoFoto = true);
 
@@ -226,21 +250,15 @@ class _PerfilPageState extends State<PerfilPage> {
       final safeName =
           '${DateTime.now().millisecondsSinceEpoch}_${p.basename(fileName)}';
 
-      final ref = FirebaseStorage.instance
-          .ref()
-          .child('conductores_perfil')
-          .child(uid)
-          .child(safeName);
+final ref = FirebaseStorage.instance
+    .ref()
+    .child('conductores_perfil')
+    .child(uid)
+    .child(safeName);
 
-      if (kIsWeb) {
-        final bytes = await picked.readAsBytes();
-        await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-      } else {
-        await ref.putFile(
-          File(picked.path),
-          SettableMetadata(contentType: 'image/jpeg'),
-        );
-      }
+// SIEMPRE putData con bytes
+final bytes = await picked.readAsBytes();
+await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
 
       final url = await ref.getDownloadURL();
 
@@ -267,14 +285,266 @@ class _PerfilPageState extends State<PerfilPage> {
     }
   }
 
-  void _toast(String msg) { // NUEVO
+  void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
     );
   }
-  // =================== FIN FOTO PERFIL =====================
 
-  // =================== BOTONES INFERIORES (NUEVO) =====================
+  // =========================================================
+  // ========== SUBIR DOCUMENTO (imagen o PDF) ===============
+  // =========================================================
+  Future<void> _elegirYSubirDocumento(String campo) async {
+    // BottomSheet con opciones
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text('Subir documento',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const SizedBox(height: 6),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Imagen desde galería'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _subirDocumentoDesdeImagen(campo);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Tomar foto'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _subirDocumentoDesdeCamara(campo);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: const Text('Seleccionar PDF / archivo'),
+              onTap: () async {
+                Navigator.pop(context);
+                await _subirDocumentoDesdeArchivo(campo);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _subirDocumentoDesdeImagen(String campo) async {
+    try {
+      if (!kIsWeb) {
+        final gal = await Permission.photos.request();
+        if (!gal.isGranted && gal.isPermanentlyDenied == false) {
+          _toast('Permiso de galería denegado');
+          return;
+        }
+      }
+      final picker = ImagePicker();
+      final XFile? picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final ext = _safeExtension(picked.name, fallback: 'jpg');
+      final mime = lookupMimeType(picked.name) ?? 'image/jpeg';
+      final bytes = await picked.readAsBytes();
+      await _subirBytesAGuardarURL(campo, bytes, ext, mime);
+    } catch (e) {
+      _toast('No se pudo seleccionar la imagen: $e');
+    }
+  }
+
+  Future<void> _subirDocumentoDesdeCamara(String campo) async {
+    try {
+      if (!kIsWeb) {
+        final cam = await Permission.camera.request();
+        if (!cam.isGranted) {
+          _toast('Permiso de cámara denegado');
+          return;
+        }
+      }
+      final picker = ImagePicker();
+      final XFile? picked = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 2000,
+        maxHeight: 2000,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final ext = _safeExtension(picked.name, fallback: 'jpg');
+      final mime = lookupMimeType(picked.name) ?? 'image/jpeg';
+      final bytes = await picked.readAsBytes();
+      await _subirBytesAGuardarURL(campo, bytes, ext, mime);
+    } catch (e) {
+      _toast('No se pudo usar la cámara: $e');
+    }
+  }
+
+  Future<void> _subirDocumentoDesdeArchivo(String campo) async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic'],
+        withData: kIsWeb, // en web necesitamos bytes
+      );
+      if (res == null || res.files.isEmpty) return;
+      final file = res.files.first;
+
+      final ext = _safeExtension(file.name, fallback: 'pdf');
+      final mime = lookupMimeType(file.name) ??
+          (ext == 'pdf' ? 'application/pdf' : 'application/octet-stream');
+
+      // Bytes (web) o desde path (móvil/desktop)
+      if (kIsWeb) {
+        final bytes = file.bytes;
+        if (bytes == null) {
+          _toast('No se pudo leer el archivo.');
+          return;
+        }
+        await _subirBytesAGuardarURL(campo, bytes, ext, mime);
+      } else {
+        if (file.path == null) {
+          _toast('Ruta de archivo no disponible.');
+          return;
+        }
+        await _subirFileAGuardarURL(campo, File(file.path!), ext, mime);
+      }
+    } catch (e) {
+      _toast('No se pudo seleccionar el archivo: $e');
+    }
+  }
+
+Future<void> _subirBytesAGuardarURL(
+  String campo,
+  Uint8List bytes,        // ← antes era List<int>
+  String ext,
+  String mime,
+) async {
+  await _subirGenerico(
+    campo,
+    uploader: (ref) async {
+      await ref.putData(
+        bytes,                          // ← directo, sin fromList
+        SettableMetadata(contentType: mime),
+      );
+    },
+    ext: ext,
+  );
+}
+
+
+  Future<void> _subirFileAGuardarURL(
+      String campo, File file, String ext, String mime) async {
+    await _subirGenerico(campo, uploader: (ref) async {
+      await ref.putFile(file, SettableMetadata(contentType: mime));
+    }, ext: ext);
+  }
+
+  Future<void> _subirGenerico(
+    String campo, {
+    required Future<void> Function(Reference ref) uploader,
+    required String ext,
+  }) async {
+    if (_subiendoCampo[campo] == true) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _toast('Sesión no válida.');
+      return;
+    }
+    final String uid = (globalUserId?.trim().isNotEmpty ?? false)
+        ? globalUserId!.trim()
+        : user.uid;
+
+    setState(() => _subiendoCampo[campo] = true);
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text('Subiendo $campo...'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(days: 1),
+    ));
+
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final safeName = '${campo}_$ts.$ext';
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('conductores_docs')
+          .child(uid)
+          .child(campo)
+          .child(safeName);
+
+      await uploader(ref);
+      final url = await ref.getDownloadURL();
+
+      final base =
+          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid';
+      await FirebaseDatabase.instance.ref('$base/$campo').set(url);
+
+      // refrescar UI local
+      setState(() {
+        switch (campo) {
+          case 'IneFrente':
+            _ineFrente = url;
+            break;
+          case 'IneAtras':
+            _ineAtras = url;
+            break;
+          case 'CartaAntecedentes':
+            _cartaAntecedentes = url;
+            break;
+          case 'ComprobanteDomicilio':
+            _comprobanteDomicilio = url;
+            break;
+        }
+        _subiendoCampo[campo] = false;
+      });
+
+      messenger.hideCurrentSnackBar();
+      _toast('Documento de $campo actualizado.');
+    } catch (e) {
+      setState(() => _subiendoCampo[campo] = false);
+      messenger.hideCurrentSnackBar();
+      _toast('Error al subir $campo: $e');
+    }
+  }
+
+  String _safeExtension(String name, {String fallback = 'dat'}) {
+    final ext = p.extension(name).replaceAll('.', '').toLowerCase();
+    if (ext.isEmpty) return fallback;
+    return ext;
+  }
+
+  bool _isPdfUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('.pdf') || lower.startsWith('blob:application/pdf');
+  }
+
+  // =================== BOTONES INFERIORES =====================
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
@@ -321,7 +591,6 @@ class _PerfilPageState extends State<PerfilPage> {
         'idTicket': soporteId,
       });
 
-      // después de guardar, cerrar sesión y enviar al login
       await FirebaseAuth.instance.signOut();
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/login');
@@ -374,7 +643,7 @@ class _PerfilPageState extends State<PerfilPage> {
                                   ),
                                 ),
                                 const Spacer(),
-                                const SizedBox(width: 48), // balance visual
+                                const SizedBox(width: 48),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -491,32 +760,48 @@ class _PerfilPageState extends State<PerfilPage> {
                                 value: _telefono,
                               ),
                               const Divider(height: 20),
-                              _InfoImageRow(
+
+                              // --------- Fila: Ine Frente ----------
+                              _InfoDocRow(
                                 leading: Icons.badge_outlined,
                                 label: 'Ine (frente)',
                                 url: _ineFrente,
-                                onTap: _openViewer,
+                                onView: _openViewer,
+                                uploading: _subiendoCampo['IneFrente'] == true,
+                                onUpload: () => _elegirYSubirDocumento('IneFrente'),
                               ),
                               const Divider(height: 20),
-                              _InfoImageRow(
+
+                              // --------- Fila: Ine Atrás ------------
+                              _InfoDocRow(
                                 leading: Icons.badge_outlined,
                                 label: 'Ine (atrás)',
                                 url: _ineAtras,
-                                onTap: _openViewer,
+                                onView: _openViewer,
+                                uploading: _subiendoCampo['IneAtras'] == true,
+                                onUpload: () => _elegirYSubirDocumento('IneAtras'),
                               ),
                               const Divider(height: 20),
-                              _InfoImageRow(
+
+                              // --------- Fila: Carta Antecedentes ---
+                              _InfoDocRow(
                                 leading: Icons.description_outlined,
                                 label: 'Carta de antecedentes',
                                 url: _cartaAntecedentes,
-                                onTap: _openViewer,
+                                onView: _openViewer,
+                                uploading: _subiendoCampo['CartaAntecedentes'] == true,
+                                onUpload: () => _elegirYSubirDocumento('CartaAntecedentes'),
                               ),
                               const Divider(height: 20),
-                              _InfoImageRow(
+
+                              // --------- Fila: Comprobante Domicilio -
+                              _InfoDocRow(
                                 leading: Icons.home_outlined,
                                 label: 'Comprobante de domicilio',
                                 url: _comprobanteDomicilio,
-                                onTap: _openViewer,
+                                onView: _openViewer,
+                                uploading: _subiendoCampo['ComprobanteDomicilio'] == true,
+                                onUpload: () => _elegirYSubirDocumento('ComprobanteDomicilio'),
                               ),
                               const SizedBox(height: 24),
 
@@ -844,17 +1129,22 @@ class _InfoTextRow extends StatelessWidget {
   }
 }
 
-class _InfoImageRow extends StatelessWidget {
+/// Fila de Documento con "Ver" y "Subir/Actualizar"
+class _InfoDocRow extends StatelessWidget {
   final IconData leading;
   final String label;
   final String url;
-  final void Function(String url) onTap;
+  final void Function(String url) onView;
+  final VoidCallback onUpload;
+  final bool uploading;
 
-  const _InfoImageRow({
+  const _InfoDocRow({
     required this.leading,
     required this.label,
     required this.url,
-    required this.onTap,
+    required this.onView,
+    required this.onUpload,
+    this.uploading = false,
   });
 
   @override
@@ -867,42 +1157,78 @@ class _InfoImageRow extends StatelessWidget {
     );
     const mainColor = Color(0xFF1A3365);
 
-    final hasImage = url.trim().isNotEmpty;
+    final hasDoc = url.trim().isNotEmpty;
 
-    return InkWell(
-      onTap: hasImage ? () => onTap(url) : null,
-      borderRadius: BorderRadius.circular(8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Icon(leading, color: mainColor),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: const TextStyle(color: titleColor, fontSize: 12)),
-                const SizedBox(height: 4),
-                Text(
-                  hasImage ? 'Ver documento' : 'No cargado',
-                  style: valueStyle.copyWith(
-                    color: hasImage ? Colors.black87 : Colors.black38,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(leading, color: mainColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: titleColor, fontSize: 12)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  // Ver documento (si hay)
+                  Expanded(
+                    child: InkWell(
+                      onTap: hasDoc ? () => onView(url) : null,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Row(
+                        children: [
+                          Icon(
+                            hasDoc
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: hasDoc ? mainColor : Colors.black26,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            hasDoc ? 'Ver documento' : 'No cargado',
+                            style: valueStyle.copyWith(
+                              color: hasDoc ? Colors.black87 : Colors.black38,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(width: 8),
+                  // Subir/Actualizar
+                  SizedBox(
+                    height: 36,
+                    child: ElevatedButton.icon(
+                      onPressed: uploading ? null : onUpload,
+                      icon: uploading
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.upload_file_outlined, size: 18),
+                      label: Text(uploading ? 'Subiendo...' : 'Subir'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1955CC),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          Icon(
-            hasImage ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-            color: hasImage ? mainColor : Colors.black26,
-            size: 20,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

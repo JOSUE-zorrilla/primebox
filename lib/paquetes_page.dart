@@ -46,6 +46,11 @@ class _PaquetesPageState extends State<PaquetesPage> {
   // (la lógica de filtro por tipo se mantiene por compatibilidad)
   String _filtroTipo = 'Todos'; // Todos | HD0D | HD1D
 
+  String _claveDireccion(Map<String, dynamic> p) {
+  return (p['DireccionEntrega'] ?? '').toString().toLowerCase().trim();
+}
+
+
   late DatabaseReference _estadoConexionRef;
   StreamSubscription<DatabaseEvent>? _estadoConexionSub;
 
@@ -388,6 +393,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
             });
           }
         });
+
+        lista.sort((a, b) => _claveDireccion(a).compareTo(_claveDireccion(b)));
 
         _paquetes..clear()..addAll(lista);
         _aplicarFiltrosEnMemoria();
