@@ -16,6 +16,8 @@ import 'login_page.dart'; // para globalNombre / globalUserId si los tienes
 import 'package:shared_preferences/shared_preferences.dart';
 import 'recolectar_tiendas_page.dart';
 import 'recoger_almacen_page.dart';
+import 'devoluciones_scan_page.dart';
+
 
 // NUEVO: mostrar QR propio y pantalla de delegar
 import 'package:qr_flutter/qr_flutter.dart';
@@ -137,7 +139,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
               size: 220,
               gapless: true,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 2),
             SelectableText(
               data,
               textAlign: TextAlign.center,
@@ -613,7 +615,12 @@ class _PaquetesPageState extends State<PaquetesPage> {
                   item(
                     icon: Icons.assignment_return_outlined,
                     text: 'Devoluciones',
-                    onTap: () => _proximamente('Devoluciones'),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const DevolucionesScanPage()),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -969,7 +976,7 @@ class _PaqueteCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(
             children: [
@@ -987,14 +994,14 @@ class _PaqueteCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 2),
           Text.rich(TextSpan(style: DefaultTextStyle.of(context).style, children: const [
-            TextSpan(text: 'Dirección\n', style: TextStyle(fontWeight: FontWeight.w700)),
+            TextSpan(text: 'Dirección', style: TextStyle(fontWeight: FontWeight.w700)),
           ])),
           Text(direccion),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text.rich(TextSpan(style: DefaultTextStyle.of(context).style, children: const [
-            TextSpan(text: 'Propietario\n', style: TextStyle(fontWeight: FontWeight.w700)),
+            TextSpan(text: 'Propietario', style: TextStyle(fontWeight: FontWeight.w700)),
           ])),
           Text(destinatario),
           const SizedBox(height: 4),
