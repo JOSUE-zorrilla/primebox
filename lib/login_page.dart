@@ -39,40 +39,55 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _verificarSesionIniciada() async {
     final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-    if (user != null) {
-      final uid = user.uid;
+    final uid = user.uid;
 
-      final DatabaseReference ref = FirebaseDatabase.instance.ref(
-        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
-      );
+    // 🔹 Siempre leeremos customData para validar y para sacar idCiudad
+    final DatabaseReference customRef = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
+    );
 
-      final snapshot = await ref.get();
+    final customSnap = await customRef.get();
 
-      if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
-        globalUserId = uid;
-        await _cargarDatosConductor(uid);
+    if (customSnap.exists && customSnap.child('TipoPerfil').value == 'Driver') {
+      globalUserId = uid;
 
-        if (!mounted) return;
+      // ⬇️ idCiudad ahora sale de customData (no de Conductores)
+      globalIdCiudad = _leerIdCiudadDesdeCustom(customSnap);
 
-        // 👉 ir a cargar centro antes de paquetes si hay ciudad
-        if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const CentroBootPage(nextRoute: '/paquetes'),
-            ),
-          );
-        } else {
-          Navigator.pushReplacementNamed(context, '/paquetes');
-        }
+      // (opcional) seguir cargando el Nombre desde Conductores
+      await _cargarNombreConductor(uid);
+
+      if (!mounted) return;
+
+      // 👉 ir a cargar centro antes de paquetes si hay ciudad
+      if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const CentroBootPage(nextRoute: '/paquetes'),
+          ),
+        );
       } else {
-        await FirebaseAuth.instance.signOut();
+        Navigator.pushReplacementNamed(context, '/paquetes');
       }
+    } else {
+      await FirebaseAuth.instance.signOut();
     }
   }
 
-  Future<void> _cargarDatosConductor(String uid) async {
+  /// Extrae idCiudad de un snapshot de customData, tolerando diferentes claves
+  String? _leerIdCiudadDesdeCustom(DataSnapshot customSnap) {
+    // Soporta 'idCiudad' o 'IdCiudad' por si acaso
+    final v1 = customSnap.child('idCiudad').value?.toString();
+    final v2 = customSnap.child('IdCiudad').value?.toString();
+    final raw = (v1 ?? v2)?.trim();
+    return (raw == null || raw.isEmpty) ? null : raw;
+  }
+
+  /// Ahora solo carga el Nombre desde Conductores (idCiudad ya no se saca de aquí)
+  Future<void> _cargarNombreConductor(String uid) async {
     final DatabaseReference conductorRef = FirebaseDatabase.instance.ref(
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid',
     );
@@ -81,7 +96,6 @@ class _LoginPageState extends State<LoginPage> {
 
     if (snapshot.exists) {
       globalNombre = snapshot.child('Nombre').value?.toString();
-      globalIdCiudad = snapshot.child('idCiudad').value?.toString();
     } else {
       debugPrint('⚠️ No se encontraron datos del conductor para UID: $uid');
     }
@@ -99,15 +113,21 @@ class _LoginPageState extends State<LoginPage> {
       final uid = credential.user?.uid;
       if (uid == null) throw Exception('UID no encontrado');
 
-      final DatabaseReference ref = FirebaseDatabase.instance.ref(
+      // 🔹 Leer customData para validar perfil y obtener idCiudad
+      final DatabaseReference customRef = FirebaseDatabase.instance.ref(
         'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
       );
 
-      final snapshot = await ref.get();
+      final customSnap = await customRef.get();
 
-      if (snapshot.exists && snapshot.child('TipoPerfil').value == 'Driver') {
+      if (customSnap.exists && customSnap.child('TipoPerfil').value == 'Driver') {
         globalUserId = uid;
-        await _cargarDatosConductor(uid);
+
+        // ⬇️ idCiudad desde customData
+        globalIdCiudad = _leerIdCiudadDesdeCustom(customSnap);
+
+        // (opcional) nombre desde Conductores
+        await _cargarNombreConductor(uid);
 
         if (!mounted) return;
 
