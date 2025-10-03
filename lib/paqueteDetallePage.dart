@@ -53,10 +53,16 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   String? _urlImagen1;
   String? _urlImagen2;
   String? _urlImagen3;
-  final List<File?> _imagenes = [null, null, null];
+  String? _urlImagen4; // NUEVO: INE
 
-  // NUEVO: previews comprimidos (lo que realmente subimos)
-  final List<Uint8List?> _previewsComprimidos = [null, null, null];
+  // Ahora 4 posiciones (0..2: evidencias normales, 3: INE opcional)
+  final List<File?> _imagenes = [null, null, null, null];
+
+  // NUEVO: previews comprimidos (lo que realmente subimos) – ahora 4
+  final List<Uint8List?> _previewsComprimidos = [null, null, null, null];
+
+  // NUEVO: switch para habilitar INE
+  bool _ineHabilitado = false;
 
   List<String> _guiasMulti = [];
 
@@ -69,9 +75,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     'Otro',
   ];
 
-  // 🔒 NUEVO: helper para saber si hay al menos 1 imagen lista
+  // 🔒 Actualizado: ahora cuenta también la Evidencia4 (INE) si está presente
   bool get _tieneAlMenosUnaImagen =>
-      _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+      _urlImagen1 != null ||
+      _urlImagen2 != null ||
+      _urlImagen3 != null ||
+      _urlImagen4 != null;
 
   @override
   void initState() {
@@ -139,26 +148,25 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     }
   }
 
-Future<void> _enviarWhatsApp() async {
-  final String mensaje = 'Hola...';
+  Future<void> _enviarWhatsApp() async {
+    final String mensaje = 'Hola...';
 
-  // Quita separadores y el '+'; wa.me exige SOLO dígitos en formato internacional
-  String tel = _normalizePhone(widget.telefono, forWhatsApp: true);
+    // Quita separadores y el '+'; wa.me exige SOLO dígitos en formato internacional
+    String tel = _normalizePhone(widget.telefono, forWhatsApp: true);
 
-  // Valida que tenga de 7 a 15 dígitos
-  if (!RegExp(r'^\d{7,15}$').hasMatch(tel)) {
-    _snack('Número inválido. Debe incluir el código de país y solo dígitos. Recibido: "$tel"');
-    return;
+    // Valida que tenga de 7 a 15 dígitos
+    if (!RegExp(r'^\d{7,15}$').hasMatch(tel)) {
+      _snack('Número inválido. Debe incluir el código de país y solo dígitos. Recibido: "$tel"');
+      return;
+    }
+
+    final uriWa = Uri.parse(
+      'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}',
+    );
+
+    final ok = await launchUrl(uriWa, mode: LaunchMode.externalApplication);
+    if (!ok) _snack('No se pudo abrir WhatsApp.');
   }
-
-  final uriWa = Uri.parse(
-    'https://wa.me/$tel?text=${Uri.encodeComponent(mensaje)}',
-  );
-
-  final ok = await launchUrl(uriWa, mode: LaunchMode.externalApplication);
-  if (!ok) _snack('No se pudo abrir WhatsApp.');
-}
-
 
   // ===== COMPRESIÓN =====
 
@@ -170,7 +178,7 @@ Future<void> _enviarWhatsApp() async {
       originalBytes,
       minWidth: 1600,
       minHeight: 1600,
-      quality: 75,            // baja más si quieres menor peso (60–70)
+      quality: 75, // baja más si quieres menor peso (60–70)
       rotate: 0,
       keepExif: true,
       format: CompressFormat.jpeg,
@@ -253,59 +261,64 @@ Future<void> _enviarWhatsApp() async {
     );
   }
 
-  // ---- NUEVO: subida comprimida ----
-// ---- Subida comprimida con UN solo SnackBar de 2s ----
-Future<void> _subirImagenAFirebase(File image, int index) async {
-  final messenger = ScaffoldMessenger.of(context);
+  // ---- Subida comprimida con UN solo SnackBar de 2s ----
+  Future<void> _subirImagenAFirebase(File image, int index) async {
+    final messenger = ScaffoldMessenger.of(context);
 
-  // Un único mensaje de 2s apenas inicia la acción
-  messenger.clearSnackBars();
-  messenger.showSnackBar(
-    const SnackBar(
-      content: Text('Cargando imagen...'),
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: 2),
-    ),
-  );
-
-  try {
-    // 1) Comprimir a JPEG
-    final Uint8List compressed = await _compressImage(image);
-
-    // 2) Subir a Firebase Storage con putData (bytes) y metadata
-    final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
-    final ref = FirebaseStorage.instance
-        .ref()
-        .child('imagenesaplicacion')
-        .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
-
-    await ref.putData(
-      compressed,
-      SettableMetadata(contentType: 'image/jpeg'),
+    // Un único mensaje de 2s apenas inicia la acción
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Cargando imagen...'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
     );
 
-    final url = await ref.getDownloadURL();
+    try {
+      // 1) Comprimir a JPEG
+      final Uint8List compressed = await _compressImage(image);
 
-    // 3) Actualizar estado: file local + preview comprimido + URL
-    if (!mounted) return;
-    setState(() {
-      _imagenes[index] = image;
-      _previewsComprimidos[index] = compressed;
+      // 2) Subir a Firebase Storage con putData (bytes) y metadata
+      final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('imagenesaplicacion')
+          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
 
-      if (index == 0) {
-        _urlImagen1 = url;
-      } else if (index == 1) {
-        _urlImagen2 = url;
-      } else {
-        _urlImagen3 = url;
-      }
-    });
-  } catch (e) {
-    // No mostramos SnackBars adicionales aunque haya error (requisito del usuario).
-    // Si quieres, deja un log para depurar:
-    // debugPrint('Error al subir imagen: $e');
+      await ref.putData(
+        compressed,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+
+      final url = await ref.getDownloadURL();
+
+      // 3) Actualizar estado: file local + preview comprimido + URL
+      if (!mounted) return;
+      setState(() {
+        // Asegura que los arreglos tengan índice suficiente (0..3)
+        if (index >= 0 && index < _imagenes.length) {
+          _imagenes[index] = image;
+        }
+        if (index >= 0 && index < _previewsComprimidos.length) {
+          _previewsComprimidos[index] = compressed;
+        }
+
+        if (index == 0) {
+          _urlImagen1 = url;
+        } else if (index == 1) {
+          _urlImagen2 = url;
+        } else if (index == 2) {
+          _urlImagen3 = url;
+        } else if (index == 3) {
+          _urlImagen4 = url; // INE
+        }
+      });
+    } catch (e) {
+      // Silencioso como pediste (solo un snack al inicio).
+      // debugPrint('Error al subir imagen: $e');
+    }
   }
-}
 
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -394,29 +407,41 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
     );
   }
 
-  Widget _photoSlot(int index) {
-    return GestureDetector(
-      onTap: () => _seleccionarImagen(index),
-      child: Container(
-        width: 90,
-        height: 90,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF4F6F9),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE6E6E6)),
-        ),
-        child: _previewsComprimidos[index] != null
-            ? ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.memory(_previewsComprimidos[index]!, fit: BoxFit.cover),
-              )
-            : (_imagenes[index] != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
-                  )
-                : const Icon(Icons.add_a_photo_outlined, size: 26, color: Colors.black45)),
+  Widget _photoSlot(int index, {String? label}) {
+    // label opcional para diferenciar el INE visualmente
+    final child = Container(
+      width: 90,
+      height: 90,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F6F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE6E6E6)),
       ),
+      child: _previewsComprimidos[index] != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(_previewsComprimidos[index]!, fit: BoxFit.cover),
+            )
+          : (_imagenes[index] != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
+                )
+              : const Icon(Icons.add_a_photo_outlined, size: 26, color: Colors.black45)),
+    );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: () => _seleccionarImagen(index),
+          child: child,
+        ),
+        if (label != null) ...[
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(fontSize: 11, color: Colors.black54)),
+        ]
+      ],
     );
   }
 
@@ -595,7 +620,7 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
 
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: List.generate(3, _photoSlot),
+                          children: List.generate(3, (i) => _photoSlot(i)),
                         ),
 
                         // 🔒 Aviso visual cuando NO hay imágenes aún
@@ -605,6 +630,25 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
                             'Debes adjuntar al menos 1 imagen para poder guardar.',
                             style: TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w600),
                             textAlign: TextAlign.center,
+                          ),
+                        ],
+
+                        const SizedBox(height: 10),
+                        // NUEVO: Switch para INE
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Adjuntar INE (opcional)',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          value: _ineHabilitado,
+                          onChanged: (v) => setState(() => _ineHabilitado = v),
+                        ),
+
+                        // Si el switch está activo, mostramos un cuarto slot para INE
+                        if (_ineHabilitado) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _photoSlot(3, label: 'INE'),
                           ),
                         ],
                       ],
@@ -657,7 +701,7 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
                             return;
                           }
 
-                          // ---------- LÓGICA ORIGINAL (NO TOCAR) ----------
+                          // ---------- LÓGICA ORIGINAL + INE ----------
                           final timestamp = DateTime.now();
                           final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
                           final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
@@ -667,16 +711,19 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
                           final nota = _notaController.text.trim();
 
                           final alMenosUnaFoto =
-                              _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null;
+                              _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null || _urlImagen4 != null;
+
                           final estadoFoto = alMenosUnaFoto
                               ? "el usuario dejó tomarse la foto"
                               : "el usuario no se dejó tomar la foto";
 
+                          final tieneIne = (_urlImagen4 != null && _urlImagen4!.isNotEmpty);
+                          final estadoIne = tieneIne ? "con INE" : "sin INE";
+
                           final textoNota =
-                              "Recibe: $parentesco con nombre $recibe, $estadoFoto${nota.isNotEmpty ? ', $nota' : ''}";
+                              "Recibe: $parentesco con nombre $recibe, $estadoFoto, $estadoIne${nota.isNotEmpty ? ', $nota' : ''}";
 
                           // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
-                          // data: si hay multiguías usa esas; si no, usa el id del registro (decodificado)
                           final String idRegistro = Uri.decodeFull(widget.id).trim();
                           final List<String> fuentes = _guiasMulti.isNotEmpty ? _guiasMulti : [idRegistro];
 
@@ -691,6 +738,7 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
                             "Evidencia1": _urlImagen1 ?? "",
                             "Evidencia2": _urlImagen2 ?? "",
                             "Evidencia3": _urlImagen3 ?? "",
+                            "Evidencia4": _urlImagen4 ?? "", // NUEVO: INE
                             "Latitude": _posicionActual?.latitude.toString() ?? "",
                             "Longitude": _posicionActual?.longitude.toString() ?? "",
                             "NombreDriver": globalNombre ?? "SinNombre",
@@ -726,7 +774,7 @@ Future<void> _subirImagenAFirebase(File image, int index) async {
                           }
 
                           if (mounted) Navigator.pop(context);
-                          // ---------- FIN LÓGICA ORIGINAL ----------
+                          // ---------- FIN LÓGICA ----------
                         }
                       : null, // 👉 desactivado si no hay imagen
                   style: ElevatedButton.styleFrom(

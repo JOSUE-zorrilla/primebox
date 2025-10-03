@@ -6,9 +6,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 
 // Globals
 import 'login_page.dart' show globalNombre, globalUserId, globalIdCiudad;
+
+// NUEVO: página de la lista de fila virtual
+import 'fila_virtual_lista_page.dart';
 
 class RecogerAlmacenScanPage extends StatefulWidget {
   final String idAlmacen;
@@ -45,8 +49,11 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
   StreamSubscription<DatabaseEvent>? _firmaSub;
   bool _enviando = false;
 
+  // NUEVO: bandera de proceso de fila virtual
+  bool _procesandoFilaVirtual = false;
+
   static const String _webhookUrl =
-      'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_fsV5EnyprpgEzVVJq62Cbf';
+      'https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_eRV73rsuWkKSAGvQxyMJ75';
 
   @override
   void initState() {
@@ -359,6 +366,171 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
     _firmaSub = null;
   }
 
+  // ====== NUEVO: Fila Virtual ======
+
+  Future<void> _onFilaVirtual() async {
+    if (_procesandoFilaVirtual) return;
+    setState(() => _procesandoFilaVirtual = true);
+
+    try {
+      final userId = (globalUserId ?? '').toString().trim();
+      final nombre = (globalNombre ?? '').toString().trim();
+
+      if (userId.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se encontró el id del usuario (idDriver).')),
+        );
+        return;
+      }
+
+      final basePath =
+          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/FilaVirtualAlmacen/${widget.idAlmacen}/FilaVirtual';
+      final miNodoRef = FirebaseDatabase.instance.ref('$basePath/$userId');
+
+      // 1) ¿Ya existe?
+      final miNodoSnap = await miNodoRef.get();
+      if (miNodoSnap.exists) {
+        // Ya está en fila -> pasar a la lista
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FilaVirtualListaPage(idAlmacen: widget.idAlmacen, nombreAlmacen: widget.nombreAlmacen),
+          ),
+        );
+        return;
+      }
+
+      // 2) Preguntar si desea unirse
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Unirse a la fila virtual'),
+          content: const Text(
+            'Esta opción te agregará a la fila virtual del almacén para ser llamado y recibir tu ruta. '
+            'Para poder unirte tienes que estar a 50 metros del almacén; de lo contrario no podrás unirte.\n\n'
+            '¿Deseas unirte ahora?'
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sí, unirme')),
+          ],
+        ),
+      );
+
+      if (ok != true) return;
+
+      // 3) Verificar permisos y obtener ubicación actual
+      final canLocate = await _ensureLocationPermission();
+      if (!canLocate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se otorgó permiso de ubicación.')),
+        );
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+
+final ubicRef = FirebaseDatabase.instance.ref(
+  'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/AlmacenPicker/${widget.idAlmacen}',
+);
+final ubicSnap = await ubicRef.get();
+
+double? almacLat;
+double? almacLng;
+
+if (ubicSnap.exists && ubicSnap.value is Map) {
+  final m = Map<String, dynamic>.from(ubicSnap.value as Map);
+  final dynamic lat = m['Latitude'];
+  final dynamic lng = m['Longitude'];
+
+  if (lat != null && lng != null) {
+    almacLat = double.tryParse(lat.toString());
+    almacLng = double.tryParse(lng.toString());
+  }
+}
+
+
+      if (almacLat == null || almacLng == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo verificar la distancia: el almacén no tiene ubicación configurada.'),
+          ),
+        );
+        return;
+      }
+
+      final distanceMeters = Geolocator.distanceBetween(
+        pos.latitude,
+        pos.longitude,
+        almacLat,
+        almacLng,
+      );
+
+      if (distanceMeters > 50) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Estás a ${distanceMeters.toStringAsFixed(1)} m del almacén. Debes estar a 50 m o menos para unirte.'),
+          ),
+        );
+        return;
+      }
+
+      // 5) Guardar registro en fila virtual
+      final ahora = _fmtYYYYMMDDHHMMSS(DateTime.now());
+      final payload = {
+        'HoraVinculacion': ahora,
+        'NombreDriver': nombre,
+        'idDriver': userId,
+        // Extras opcionales por si quieres guardar posición de ingreso:
+        'LatitudIngreso': pos.latitude,
+        'LongitudIngreso': pos.longitude,
+      };
+
+      await miNodoRef.set(payload);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Te uniste a la fila virtual.')),
+      );
+
+      // 6) Navegar a la lista
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FilaVirtualListaPage(idAlmacen: widget.idAlmacen, nombreAlmacen: widget.nombreAlmacen),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error en fila virtual: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _procesandoFilaVirtual = false);
+    }
+  }
+
+  Future<bool> _ensureLocationPermission() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      await Geolocator.openLocationSettings();
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return false;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return false;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      return false;
+    }
+    return true;
+  }
+
   // ===== UI =====
   @override
   Widget build(BuildContext context) {
@@ -581,6 +753,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
           color: const Color(0xFFF2F3F7),
           child: Row(
             children: [
+              // Con Firma
               Expanded(
                 child: OutlinedButton(
                   onPressed: _onConFirma,
@@ -601,7 +774,31 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
+
+              // NUEVO: Fila Virtual
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _procesandoFilaVirtual ? null : _onFilaVirtual,
+                  icon: const Icon(Icons.people_alt_outlined),
+                  label: Text(
+                    _procesandoFilaVirtual ? 'Procesando...' : 'Fila Virtual',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: const Color(0xFF0EA5E9), // azul celeste para diferenciar
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Finalizar
               Expanded(
                 child: ElevatedButton(
                   onPressed: _seleccionados.isEmpty || _enviando ? null : _onFinalizar,
