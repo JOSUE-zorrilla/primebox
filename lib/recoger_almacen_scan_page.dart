@@ -135,9 +135,11 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
           setState(() => _seleccionados.insert(0, code));
         }
       } else {
+        // <<<<< CAMBIO: SnackBar con duración máxima de 2 segundos >>>>>
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('El código no pertenece a este almacén.'),
+          SnackBar(
+            content: const Text('El código no pertenece a este almacén.'),
+            duration: const Duration(seconds: 2),
           ),
         );
         // Si no existe en Firebase, desmarcamos para permitir intentarlo nuevamente si fue un error de lectura
@@ -208,7 +210,6 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       final ymd = _fmtYYYYMMDD(now);
       final ymdhms = _fmtYYYYMMDDHHMMSS(now);
 
-   
       final Map<String, dynamic> data = {};
       for (final code in _seleccionados) {
         data[code] = {'idPaquetePB': code};
@@ -786,26 +787,25 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
               ),
               const SizedBox(width: 8),
 
-              // NUEVO: Fila Virtual
+              // NUEVO: Fila Virtual (estilo Outlined como "Con Firma" pero con borde amarillo)
               Expanded(
-                child: ElevatedButton.icon(
+                child: OutlinedButton(
                   onPressed: _procesandoFilaVirtual ? null : _onFilaVirtual,
-                  icon: const Icon(Icons.people_alt_outlined),
-                  label: Text(
-                    _procesandoFilaVirtual ? 'Procesando...' : 'Fila Virtual',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: const Color(0xFF0EA5E9), // azul celeste para diferenciar
-                    elevation: 0,
+                  style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: const BorderSide(color: Colors.amber, width: 1.5),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
+                    foregroundColor: Colors.amber, // color del texto y ripple
+                  ),
+                  child: Text(
+                    _procesandoFilaVirtual ? 'Procesando...' : 'Fila Virtual',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
+
               const SizedBox(width: 8),
 
               // Finalizar
