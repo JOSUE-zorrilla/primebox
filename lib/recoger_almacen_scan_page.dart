@@ -15,10 +15,10 @@ import 'login_page.dart' show globalNombre, globalUserId, globalIdCiudad;
 import 'fila_virtual_lista_page.dart';
 
 class RecogerAlmacenScanPage extends StatefulWidget {
-  final String idAlmacen;
+  final String idAlmacen;        // IMPORTANTE: aquí se espera el KEY del nodo de AlmacenPicker
   final String nombreAlmacen;
   final String direccionAlmacen;
-  final String idFirma; // viene de la pantalla anterior
+  final String idFirma;          // viene de la pantalla anterior
 
   const RecogerAlmacenScanPage({
     super.key,
@@ -182,6 +182,14 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
     return '${dt.year}-${_two(dt.month)}-${_two(dt.day)} ${_two(dt.hour)}:${_two(dt.minute)}:${_two(dt.second)}';
   }
 
+  // ====== util: parseo robusto a double ======
+  double? _toDoubleLoose(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    final s = v.toString().trim().replaceAll(',', '.');
+    return double.tryParse(s);
+  }
+
   // ====== construir payload y enviar webhook ======
   Future<void> _enviarWebhook({String? urlFirma}) async {
     if (_seleccionados.isEmpty) {
@@ -200,10 +208,10 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       final ymd = _fmtYYYYMMDD(now);
       final ymdhms = _fmtYYYYMMDDHHMMSS(now);
 
-      // data = { "CODIGO": {"idGuia": "CODIGO"}, ... }
+   
       final Map<String, dynamic> data = {};
       for (final code in _seleccionados) {
-        data[code] = {'idGuia': code};
+        data[code] = {'idPaquetePB': code};
       }
 
       final payload = {
@@ -431,25 +439,27 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
 
       final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
 
-final ubicRef = FirebaseDatabase.instance.ref(
-  'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/AlmacenPicker/${widget.idAlmacen}',
-);
-final ubicSnap = await ubicRef.get();
+      // ====== LECTURA POR KEY DEL NODO EN AlmacenPicker ======
+      final ubicRef = FirebaseDatabase.instance.ref(
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/AlmacenPicker/${widget.idAlmacen}',
+      );
+      final ubicSnap = await ubicRef.get();
 
-double? almacLat;
-double? almacLng;
+      double? almacLat;
+      double? almacLng;
 
-if (ubicSnap.exists && ubicSnap.value is Map) {
-  final m = Map<String, dynamic>.from(ubicSnap.value as Map);
-  final dynamic lat = m['Latitude'];
-  final dynamic lng = m['Longitude'];
+      if (ubicSnap.exists) {
+        // Usa child() para evitar problemas de casteo a Map<String, dynamic>
+        almacLat = _toDoubleLoose(ubicSnap.child('Latitude').value)
+                ?? _toDoubleLoose(ubicSnap.child('latitude').value)
+                ?? _toDoubleLoose(ubicSnap.child('Lat').value)
+                ?? _toDoubleLoose(ubicSnap.child('lat').value);
 
-  if (lat != null && lng != null) {
-    almacLat = double.tryParse(lat.toString());
-    almacLng = double.tryParse(lng.toString());
-  }
-}
-
+        almacLng = _toDoubleLoose(ubicSnap.child('Longitude').value)
+                ?? _toDoubleLoose(ubicSnap.child('longitude').value)
+                ?? _toDoubleLoose(ubicSnap.child('Lng').value)
+                ?? _toDoubleLoose(ubicSnap.child('lng').value);
+      }
 
       if (almacLat == null || almacLng == null) {
         ScaffoldMessenger.of(context).showSnackBar(
