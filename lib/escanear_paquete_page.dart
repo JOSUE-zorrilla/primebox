@@ -50,7 +50,27 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     } catch (_) {}
   }
 
-  // Mostrar alert con el contenido escaneado; lo recordamos para poder cerrarlo al navegar
+  // Helper para armar la dirección concatenada en la misma variable
+  String _composeDireccion(Map m) {
+    String _s(dynamic v) => (v ?? '').toString().trim();
+
+    final base = _s(m['DireccionEntrega']);
+    final exterior = _s(m['Exterior']);
+    final interior = _s(m['Interior']);
+    final colonia = _s(m['Colonia']);
+    final cp = _s(m['CodigoPostal']).isEmpty ? _s(m['CódigoPostal']) : _s(m['CodigoPostal']);
+
+    final parts = <String>[];
+    if (base.isNotEmpty) parts.add(base);
+    if (exterior.isNotEmpty) parts.add('Ext. $exterior');
+    if (interior.isNotEmpty) parts.add('Int. $interior');
+    if (colonia.isNotEmpty) parts.add(colonia);
+    if (cp.isNotEmpty) parts.add('CP $cp');
+
+    return parts.join(', ');
+  }
+
+  // Mostrar alert con el contenido escaneado
   void _showScannedAlert(String code) {
     if (!mounted) return;
     _dialogAbierto = true;
@@ -79,7 +99,7 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     if (!mounted) return;
     if (_dialogAbierto) {
       _dialogAbierto = false;
-      Navigator.of(context, rootNavigator: true).pop(); // cierra el AlertDialog
+      Navigator.of(context, rootNavigator: true).pop();
     }
   }
 
@@ -87,7 +107,6 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     if (_procesando) return;
     setState(() => _procesando = true);
 
-    // corta frames lo antes posible
     try { await _controller?.pauseCamera(); } catch (_) {}
 
     try {
@@ -121,7 +140,7 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
             content: Text('El paquete no lo tienes asignado'),
           ),
         );
-        Navigator.pop(context); // volver a la pantalla anterior
+        Navigator.pop(context);
         return;
       }
 
@@ -135,21 +154,18 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
       final data = GuiaData(
         id: code,
         nombreDestinatario: (m['NombreDestinatario'] ?? '').toString(),
-        direccionEntrega: (m['DireccionEntrega'] ?? '').toString(),
+        direccionEntrega: _composeDireccion(m), // misma variable pero concatenada
         telefono: (m['Telefono'] ?? '').toString(),
         tnReference: (m['Referencia'] ?? '').toString(),
       );
 
-      // Limpia la cámara ANTES de navegar
-// Limpia la cámara ANTES de navegar
-try {
-  _controller?.pauseCamera();
-  _controller?.dispose();
-} catch (_) {}
-_controller = null;
+      // Limpia la cámara antes de navegar
+      try {
+        _controller?.pauseCamera();
+        _controller?.dispose();
+      } catch (_) {}
+      _controller = null;
 
-
-      // Cierra el diálogo del escaneo si sigue abierto y navega
       _cerrarDialogSiAbierto();
 
       if (!mounted) return;
@@ -175,7 +191,6 @@ _controller = null;
       final code = scan.code?.trim() ?? '';
       if (code.isEmpty || _procesando) return;
 
-      // Deduplicación simple en ráfaga de < 800ms
       final ahora = DateTime.now();
       if (_ultimoCodigoProcesado == code &&
           _ultimoMomentoProcesado != null &&
@@ -185,8 +200,8 @@ _controller = null;
       _ultimoCodigoProcesado = code;
       _ultimoMomentoProcesado = ahora;
 
-      _showScannedAlert(code); // muestra el diálogo
-      _handleCode(code);       // y sigue el flujo
+      _showScannedAlert(code);
+      _handleCode(code);
     });
   }
 
