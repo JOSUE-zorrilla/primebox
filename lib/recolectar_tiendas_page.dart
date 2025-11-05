@@ -1,8 +1,8 @@
-// recolectar_tiendas_page.dart
-import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'recolectar_recoleccion_page.dart';
+import 'login_page.dart'; // para usar globalIdCiudad
 
 class RecolectarTiendasPage extends StatefulWidget {
   const RecolectarTiendasPage({super.key});
@@ -17,128 +17,96 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
 
   List<_Centro> _centros = [];
   List<_Centro> _filtrados = [];
+  DatabaseReference? _ref;
+  Stream<DatabaseEvent>? _stream;
 
   @override
   void initState() {
     super.initState();
-    _cargarLocales();
+    _cargarLocalesDesdeFirebase();
     _searchCtrl.addListener(_filtrar);
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _stream?.drain();
     super.dispose();
   }
 
-  Future<void> _cargarLocales() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> _cargarLocalesDesdeFirebase() async {
+    if (globalIdCiudad == null || globalIdCiudad!.isEmpty) {
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró ID de ciudad. Inicia sesión nuevamente.')),
+      );
+      return;
+    }
 
-    final jsonStr = prefs.getString('cr_centros_json');
-    final List<_Centro> lista = [];
+    final path =
+        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/CentrosRecoleccionCiudad/$globalIdCiudad/CentrosRecoleccion';
+    _ref = FirebaseDatabase.instance.ref(path);
 
-    if (jsonStr != null && jsonStr.trim().isNotEmpty) {
-      try {
-        final decoded = jsonDecode(jsonStr);
+    try {
+      final snap = await _ref!.get();
+      if (!snap.exists || snap.value == null) {
+        setState(() {
+          _loading = false;
+          _centros = [];
+          _filtrados = [];
+        });
+        return;
+      }
 
-        // 1) LISTA de objetos
-        if (decoded is List) {
-          for (final item in decoded) {
-            if (item is Map) {
-              final id = (item['IdTienda'] ??
-                      item['idTienda'] ??
-                      item['Id'] ??
-                      item['id'] ??
-                      item['uid'] ??
-                      item['key'] ??
-                      item['idGuiaPB'] ?? // por si viene como guía
-                      '')
-                  .toString();
+      final List<_Centro> lista = [];
+      final value = snap.value;
 
-              // nombre/dirección opcionales
-              final nombre = (item['Nombre'] ?? item['nombre'] ?? id).toString();
-              final direccion =
-                  (item['Direccion'] ?? item['direccion'] ?? '').toString();
-              final icono = (item['Icono'] ?? item['icono'] ?? '').toString();
+      if (value is Map) {
+        value.forEach((key, val) {
+          if (val is Map) {
+            final id = (val['IdTienda'] ??
+                    val['idTienda'] ??
+                    val['id'] ??
+                    key)
+                .toString();
 
-              lista.add(_Centro(
-                idTienda: id,
-                nombre: nombre.isEmpty ? id : nombre,
-                direccion: direccion,
-                iconUrl: icono,
-              ));
-            }
+            final nombre =
+                (val['Nombre'] ?? val['nombre'] ?? 'ID $key').toString();
+            final direccion =
+                (val['Direccion'] ?? val['direccion'] ?? '').toString();
+            final icono = (val['Icono'] ?? val['icono'] ?? '').toString();
+
+            lista.add(_Centro(
+              idTienda: id,
+              nombre: nombre.isEmpty ? 'ID $key' : nombre,
+              direccion: direccion,
+              iconUrl: icono,
+            ));
+          } else {
+            lista.add(_Centro(
+              idTienda: key.toString(),
+              nombre: 'ID $key',
+              direccion: '',
+              iconUrl: '',
+            ));
           }
-        }
-        // 2) MAPA { "<id>": { ... } }  ← TU CASO
-        else if (decoded is Map) {
-          decoded.forEach((key, value) {
-            if (value is Map) {
-              // si no hay id dentro, usar la CLAVE del mapa
-              final id = (value['IdTienda'] ??
-                      value['idTienda'] ??
-                      value['Id'] ??
-                      value['id'] ??
-                      value['idGuiaPB'] ??
-                      key)
-                  .toString();
-
-              // estos datos pueden NO venir; mostramos algo útil
-              final nombre =
-                  (value['Nombre'] ?? value['nombre'] ?? 'ID $key').toString();
-              final direccion =
-                  (value['Direccion'] ?? value['direccion'] ?? '').toString();
-              final icono = (value['Icono'] ?? value['icono'] ?? '').toString();
-
-              lista.add(_Centro(
-                idTienda: id,
-                nombre: nombre.isEmpty ? 'ID $key' : nombre,
-                direccion: direccion,
-                iconUrl: icono,
-              ));
-            } else {
-              // Si el valor no es Map, al menos mostramos la clave como item
-              lista.add(_Centro(
-                idTienda: key.toString(),
-                nombre: 'ID $key',
-                direccion: '',
-                iconUrl: '',
-              ));
-            }
-          });
-        }
-      } catch (_) {
-        // sigue al fallback
+        });
       }
-    }
 
-    // Fallback: llaves individuales (1 centro)
-    if (lista.isEmpty) {
-      final id = (prefs.getString('cr_id_tienda') ??
-              prefs.getString('cr_id') ??
-              prefs.getString('cr_key') ??
-              '')
-          .trim();
-      final nombre = (prefs.getString('cr_nombre') ?? '').trim();
-      final direccion = (prefs.getString('cr_direccion') ?? '').trim();
-      final icono = (prefs.getString('cr_icono') ?? '').trim();
-      if (id.isNotEmpty || nombre.isNotEmpty || direccion.isNotEmpty) {
-        lista.add(_Centro(
-          idTienda: id,
-          nombre: nombre.isEmpty ? id : nombre,
-          direccion: direccion,
-          iconUrl: icono,
-        ));
-      }
-    }
+      lista.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
 
-    // Orden y setState
-    lista.sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
-    setState(() {
-      _centros = lista;
-      _filtrados = [...lista];
-      _loading = false;
-    });
+      setState(() {
+        _centros = lista;
+        _filtrados = [...lista];
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error al cargar centros: $e');
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al cargar datos: $e')),
+      );
+    }
   }
 
   void _filtrar() {
@@ -165,7 +133,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header azul
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
@@ -262,7 +230,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                           child: Padding(
                             padding: EdgeInsets.all(24.0),
                             child: Text(
-                              'No hay registros.\nInicia sesión nuevamente para sincronizar.',
+                              'No hay centros de recolección disponibles.',
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -286,7 +254,6 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                                   return;
                                 }
 
-                                // Generar el timestamp de Embarque y enviarlo a la siguiente pantalla
                                 final embarqueMs =
                                     DateTime.now().millisecondsSinceEpoch;
 
@@ -297,7 +264,7 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
                                       nombreCentro: c.nombre,
                                       direccionCentro: c.direccion,
                                       iconUrl: c.iconUrl,
-                                      embarqueMs: embarqueMs, // ← NUEVO
+                                      embarqueMs: embarqueMs,
                                     ),
                                   ),
                                 );
@@ -313,6 +280,9 @@ class _RecolectarTiendasPageState extends State<RecolectarTiendasPage> {
   }
 }
 
+// ========================
+//   TARJETA VISUAL
+// ========================
 class _CentroCard extends StatelessWidget {
   final String iconUrl;
   final String nombre;
@@ -410,11 +380,15 @@ class _CentroCard extends StatelessWidget {
   }
 }
 
+// ========================
+//   MODELO LOCAL
+// ========================
 class _Centro {
-  final String idTienda;   // ← aquí guardamos la CLAVE del mapa (p.ej. L0003175562114040030PB)
+  final String idTienda;
   final String nombre;
   final String direccion;
   final String iconUrl;
+
   _Centro({
     required this.idTienda,
     required this.nombre,

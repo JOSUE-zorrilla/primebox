@@ -54,47 +54,74 @@ class _DelegarPaquetePageState extends State<DelegarPaquetePage> {
   String _norm(String s) => s.trim().replaceAll(RegExp(r'\s+'), '').replaceAll('#', '');
 
   Future<void> _onScan(String? raw) async {
-    if (_navegando) return; // evitar doble navegación
-    if (raw == null || raw.trim().isEmpty) return;
+  if (_navegando) return; // evitar doble navegación
+  if (raw == null || raw.trim().isEmpty) return;
 
-    final code = _norm(raw);
-    if (code.isEmpty) return;
+  final code = _norm(raw);
+  if (code.isEmpty) return;
 
-    _qrController?.pauseCamera();
+  _qrController?.pauseCamera();
 
-    try {
-      // Buscar nombre del compañero en Conductores/{code}
-      final ref = FirebaseDatabase.instance.ref(
-          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$code');
-      final snap = await ref.get();
+  try {
+    // Buscar nombre del compañero en Conductores/{code}
+    final ref = FirebaseDatabase.instance.ref(
+      'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$code',
+    );
+    final snap = await ref.get();
 
-      String nombreCompanero = '—';
-      if (snap.exists && snap.value is Map) {
-        final map = Map<String, dynamic>.from(snap.value as Map);
-        nombreCompanero =
-            (map['Nombre'] ?? map['nombre'] ?? '—').toString();
-      }
-
+    // 👉🏼 Si NO existe, avisamos y NO navegamos
+    if (!snap.exists) {
       if (!mounted) return;
-      _navegando = true;
-      // Ir a segunda pantalla para escanear paquetes
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DelegarPaqueteEscanearPaquetesPage(
-            idCompanero: code,
-            nombreCompanero: nombreCompanero,
-          ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El ID escaneado no existe en Conductores.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
         ),
       );
-    } catch (_) {
-      // si algo falla, simplemente permitimos reintentar
-    } finally {
-      if (!mounted) return;
-      _navegando = false;
+      // reanudar cámara para reintentar
       _qrController?.resumeCamera();
+      return;
     }
+
+    // Existe. Opcionalmente leemos el nombre (si es Map)
+    String nombreCompanero = '—';
+    if (snap.value is Map) {
+      final map = Map<String, dynamic>.from(snap.value as Map);
+      nombreCompanero = (map['Nombre'] ?? map['nombre'] ?? '—').toString();
+    }
+
+    if (!mounted) return;
+    _navegando = true;
+
+    // Ir a segunda pantalla para escanear paquetes
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DelegarPaqueteEscanearPaquetesPage(
+          idCompanero: code,
+          nombreCompanero: nombreCompanero,
+        ),
+      ),
+    );
+  } catch (e) {
+    // Error inesperado: permitimos reintentar
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error leyendo el ID: $e'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  } finally {
+    if (!mounted) return;
+    _navegando = false;
+    // Si navegamos, al volver se reanuda; si no navegamos, ya reanudamos arriba
+    _qrController?.resumeCamera();
   }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -138,7 +165,7 @@ class _DelegarPaquetePageState extends State<DelegarPaquetePage> {
                   const Align(
                     alignment: Alignment.center,
                     child: Text(
-                      'Delegar paquetes',
+                      'Leer QR Driver',
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,

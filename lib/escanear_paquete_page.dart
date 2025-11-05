@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -18,15 +19,18 @@ class EscanearPaquetePage extends StatefulWidget {
 class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? _controller;
+
   bool _permissionGranted = false;
   bool _procesando = false;
 
-  // para deduplicar ráfagas del mismo código
+  // deduplicación
   String? _ultimoCodigoProcesado;
   DateTime? _ultimoMomentoProcesado;
 
-  // para cerrar el diálogo si sigue abierto al navegar
-  bool _dialogAbierto = false;
+  // feedback instantáneo
+  String _scanTexto = '';
+  bool _mostrarBanner = false;
+  Timer? _ocultarBannerTimer;
 
   @override
   void initState() {
@@ -50,7 +54,7 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     } catch (_) {}
   }
 
-  // Helper para armar la dirección concatenada en la misma variable
+  // Helper para armar la dirección concatenada
   String _composeDireccion(Map m) {
     String _s(dynamic v) => (v ?? '').toString().trim();
 
@@ -70,43 +74,24 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     return parts.join(', ');
   }
 
-  // Mostrar alert con el contenido escaneado
-  void _showScannedAlert(String code) {
-    if (!mounted) return;
-    _dialogAbierto = true;
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => AlertDialog(
-        title: const Text('Código detectado'),
-        content: SelectableText(code),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _dialogAbierto = false;
-              Navigator.of(context).pop();
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    ).then((_) {
-      _dialogAbierto = false;
+  // Muestra banner con el contenido del QR inmediatamente
+  void _mostrarContenidoInstantaneo(String code, {Duration visible = const Duration(seconds: 2)}) {
+    _ocultarBannerTimer?.cancel();
+    setState(() {
+      _scanTexto = code;
+      _mostrarBanner = true;
     });
-  }
-
-  void _cerrarDialogSiAbierto() {
-    if (!mounted) return;
-    if (_dialogAbierto) {
-      _dialogAbierto = false;
-      Navigator.of(context, rootNavigator: true).pop();
-    }
+    _ocultarBannerTimer = Timer(visible, () {
+      if (!mounted) return;
+      setState(() => _mostrarBanner = false);
+    });
   }
 
   Future<void> _handleCode(String code) async {
     if (_procesando) return;
     setState(() => _procesando = true);
 
+    // Pausa la cámara después de mostrar el contenido, para evitar ráfagas
     try { await _controller?.pauseCamera(); } catch (_) {}
 
     try {
@@ -132,13 +117,8 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
 
       if (!asignadoSnap.exists) {
         if (!mounted) return;
-        _cerrarDialogSiAbierto();
-        await showDialog(
-          context: context,
-          builder: (_) => const AlertDialog(
-            title: Text('No asignado'),
-            content: Text('El paquete no lo tienes asignado'),
-          ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('El paquete no lo tienes asignado.')),
         );
         Navigator.pop(context);
         return;
@@ -154,19 +134,16 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
       final data = GuiaData(
         id: code,
         nombreDestinatario: (m['NombreDestinatario'] ?? '').toString(),
-        direccionEntrega: _composeDireccion(m), // misma variable pero concatenada
+        direccionEntrega: _composeDireccion(m),
         telefono: (m['Telefono'] ?? '').toString(),
         tnReference: (m['Referencia'] ?? '').toString(),
       );
 
-      // Limpia la cámara antes de navegar
+      // Limpia cámara y navega
       try {
-        _controller?.pauseCamera();
-        _controller?.dispose();
+         _controller?.dispose();
       } catch (_) {}
       _controller = null;
-
-      _cerrarDialogSiAbierto();
 
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -175,7 +152,6 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
       );
     } catch (e) {
       if (!mounted) return;
-      _cerrarDialogSiAbierto();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error al procesar el código: $e')),
       );
@@ -187,10 +163,16 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
 
   void _onQRViewCreated(QRViewController controller) {
     _controller = controller;
+
     controller.scannedDataStream.listen((scan) {
       final code = scan.code?.trim() ?? '';
-      if (code.isEmpty || _procesando) return;
+      if (code.isEmpty) return;
 
+      // feedback instantáneo (sin bloquear)
+      _mostrarContenidoInstantaneo(code);
+
+      // control de ráfagas / reprocesado
+      if (_procesando) return;
       final ahora = DateTime.now();
       if (_ultimoCodigoProcesado == code &&
           _ultimoMomentoProcesado != null &&
@@ -200,13 +182,14 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
       _ultimoCodigoProcesado = code;
       _ultimoMomentoProcesado = ahora;
 
-      _showScannedAlert(code);
+      // continúa con la lógica normal en segundo plano
       _handleCode(code);
     });
   }
 
   @override
   void dispose() {
+    _ocultarBannerTimer?.cancel();
     try { _controller?.dispose(); } catch (_) {}
     _controller = null;
     super.dispose();
@@ -220,15 +203,65 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
           ? const Center(child: Text('Se requiere permiso de cámara para escanear.'))
           : Stack(
               children: [
+                // Vista de cámara
                 QRView(
                   key: qrKey,
                   onQRViewCreated: _onQRViewCreated,
                 ),
+
+                // Indicador de procesamiento en overlay (no bloquea el banner)
                 if (_procesando)
-                  Container(
-                    color: Colors.black45,
-                    child: const Center(child: CircularProgressIndicator()),
+                  IgnorePointer(
+                    child: Container(
+                      color: Colors.black26,
+                      alignment: Alignment.center,
+                      child: const CircularProgressIndicator(),
+                    ),
                   ),
+
+                // Banner superior con el contenido del QR (aparece al instante)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOut,
+                  left: 0,
+                  right: 0,
+                  top: _mostrarBanner ? 0 : -80,
+                  child: SafeArea(
+                    child: Container(
+                      margin: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.8),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: DefaultTextStyle(
+                        style: const TextStyle(color: Colors.white),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.qr_code, color: Colors.white),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Código detectado',
+                                      style: TextStyle(fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _scanTexto,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
     );

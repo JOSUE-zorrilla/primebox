@@ -81,15 +81,13 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   List<PaqueteLocal> _seleccionados = [];
 
   final TextEditingController _buscarCtrl = TextEditingController();
-
-  // NEW: controlador de scroll para llevar la lista al tope luego de insertar
   final ScrollController _listCtrl = ScrollController();
 
   // ====== Scanner embebido ======
   final GlobalKey _qrKey = GlobalKey(debugLabel: 'QR');
   QRViewController? _qrController;
   bool _permissionGranted = false;
-  final Set<String> _codesProcesados = {}; // evita duplicados por “rebote”
+  final Set<String> _codesProcesados = {}; // evita duplicados por rebote
 
   // ====== Ubicación precargada ======
   bool _locLoading = true;
@@ -107,9 +105,10 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   @override
   void initState() {
     super.initState();
-    _syncFirebaseToLocal();
-    _checkCameraPermission(); // permiso de cámara para QR
-    _initLocation(); // obtener lat/lng al cargar la pantalla
+    _restoreSeleccionadosEarly(); // Restaurar de disco (estable y/o embarque)
+    _syncFirebaseToLocal();       // Luego sincronizar índice con Firebase
+    _checkCameraPermission();     // Permiso de cámara para QR
+    _initLocation();              // Obtener lat/lng al cargar la pantalla
   }
 
   @override
@@ -117,11 +116,10 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     _buscarCtrl.dispose();
     _qrController?.dispose();
     _firmaSub?.cancel();
-    _listCtrl.dispose(); // NEW
+    _listCtrl.dispose();
     super.dispose();
   }
 
-  // Hot reload: pausar/reanudar cámara
   @override
   void reassemble() {
     super.reassemble();
@@ -129,10 +127,30 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     _qrController?.resumeCamera();
   }
 
+  // --------- KEYS de persistencia ----------
   String get _prefsKey => 'pb_guias_${widget.idTienda}';
+
+  // v2 JSON (completa): por embarque (compat) y estable (sin embarque)
+  String get _prefsSelV2ByEmbarque =>
+      'pb_guias_sel_v2_${widget.idTienda}_${widget.embarqueMs}';
+  String get _prefsSelV2Stable => 'pb_guias_sel_v2_${widget.idTienda}';
+
+  // v1 (solo claves normalizadas): por embarque y estable
+  String get _prefsSelV1ByEmbarque =>
+      'pb_guias_sel_${widget.idTienda}_${widget.embarqueMs}';
+  String get _prefsSelV1Stable => 'pb_guias_sel_${widget.idTienda}';
+
+  // -----------------------------------------
 
   String _norm(String s) =>
       s.trim().toUpperCase().replaceAll(' ', '').replaceAll('#', '');
+
+  /// Clave unificada de paquete para comparar/deduplicar
+  String _pkKey(PaqueteLocal p) => _norm(
+        p.idGuiaPB.isNotEmpty
+            ? p.idGuiaPB
+            : (p.tnReference.isNotEmpty ? p.tnReference : p.idGuiaProveedor),
+      );
 
   // ====== Permisos ======
   Future<void> _checkCameraPermission() async {
@@ -152,9 +170,10 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     final ref = FirebaseDatabase.instance.ref(
         'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/idGuiasSolicitadas/${widget.idTienda}/PaquetesSolicitados');
 
+    List<PaqueteLocal> lista = [];
+
     try {
       final snap = await ref.get();
-      final List<PaqueteLocal> lista = [];
 
       if (snap.value is Map) {
         final map = snap.value as Map;
@@ -187,17 +206,6 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
           _prefsKey, jsonEncode(lista.map((e) => e.toJson()).toList()));
       await prefs.setInt('${_prefsKey}_lastSync',
           DateTime.now().millisecondsSinceEpoch);
-
-      _indexPorCodigo.clear();
-      for (final p in lista) {
-        if (p.idGuiaPB.isNotEmpty) _indexPorCodigo[_norm(p.idGuiaPB)] = p;
-        if (p.idGuiaProveedor.isNotEmpty) {
-          _indexPorCodigo[_norm(p.idGuiaProveedor)] = p;
-        }
-        if (p.tnReference.isNotEmpty) {
-          _indexPorCodigo[_norm(p.tnReference)] = p;
-        }
-      }
     } catch (_) {
       // Si falla red, intenta cargar de local
       final prefs = await SharedPreferences.getInstance();
@@ -205,21 +213,163 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       if (raw != null) {
         final decoded = jsonDecode(raw);
         if (decoded is List) {
-          for (final m in decoded) {
-            final p = PaqueteLocal.fromMap(m as Map);
-            if (p.idGuiaPB.isNotEmpty) _indexPorCodigo[_norm(p.idGuiaPB)] = p;
-            if (p.idGuiaProveedor.isNotEmpty) {
-              _indexPorCodigo[_norm(p.idGuiaProveedor)] = p;
-            }
-            if (p.tnReference.isNotEmpty) {
-              _indexPorCodigo[_norm(p.tnReference)] = p;
-            }
-          }
+          lista = decoded.map<PaqueteLocal>((m) => PaqueteLocal.fromMap(m)).toList();
         }
       }
     }
 
+    // Construir índice por códigos normalizados
+    _indexPorCodigo.clear();
+    for (final p in lista) {
+      if (p.idGuiaPB.isNotEmpty) _indexPorCodigo[_norm(p.idGuiaPB)] = p;
+      if (p.idGuiaProveedor.isNotEmpty) {
+        _indexPorCodigo[_norm(p.idGuiaProveedor)] = p;
+      }
+      if (p.tnReference.isNotEmpty) {
+        _indexPorCodigo[_norm(p.tnReference)] = p;
+      }
+    }
+
+    // Reconciliar seleccionados (si se restauraron antes que Firebase)
+    _reconcileSeleccionadosConIndice();
+
     if (mounted) setState(() => _loadingData = false);
+  }
+
+  // ====== Persistencia de seleccionados ======
+  Future<void> _persistSeleccionados() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // v2: guardo la lista completa en JSON (por embarque y estable)
+      final jsonList =
+          jsonEncode(_seleccionados.map((e) => e.toJson()).toList());
+      await prefs.setString(_prefsSelV2ByEmbarque, jsonList);
+      await prefs.setString(_prefsSelV2Stable, jsonList);
+
+      // v1: también guardo las claves normalizadas (por compat)
+      final keys = _seleccionados.map((p) => _pkKey(p)).toList();
+      await prefs.setStringList(_prefsSelV1ByEmbarque, keys);
+      await prefs.setStringList(_prefsSelV1Stable, keys);
+    } catch (_) {}
+  }
+
+  /// Restaurar inmediatamente desde disco:
+  /// 1) v2 por embarque → 2) v2 estable → 3) v1 por embarque → 4) v1 estable
+  Future<void> _restoreSeleccionadosEarly() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Helper: intenta leer una lista JSON v2
+      List<PaqueteLocal>? _readV2(String key) {
+        final raw = prefs.getString(key);
+        if (raw == null || raw.isEmpty) return null;
+        final decoded = jsonDecode(raw);
+        if (decoded is! List) return null;
+        return decoded.map<PaqueteLocal>((m) => PaqueteLocal.fromMap(m)).toList();
+      }
+
+      // Helper: intenta leer claves v1
+      List<String>? _readV1(String key) {
+        final lst = prefs.getStringList(key);
+        if (lst == null || lst.isEmpty) return null;
+        return lst;
+      }
+
+      List<PaqueteLocal>? restoredV2 =
+          _readV2(_prefsSelV2ByEmbarque) ?? _readV2(_prefsSelV2Stable);
+
+      if (restoredV2 != null) {
+        _codesProcesados
+          ..clear()
+          ..addAll(restoredV2.map(_pkKey));
+        if (mounted) {
+          setState(() {
+            _seleccionados = restoredV2!;
+          });
+        }
+        return;
+      }
+
+      // Fallback v1 (claves)
+      final keysV1 = _readV1(_prefsSelV1ByEmbarque) ?? _readV1(_prefsSelV1Stable);
+      if (keysV1 != null) {
+        _codesProcesados
+          ..clear()
+          ..addAll(keysV1);
+
+        // Placeholders con el código como título hasta que llegue índice
+        final placeholders = keysV1
+            .map((k) => PaqueteLocal(
+                  idGuiaPB: k,
+                  idGuiaProveedor: '',
+                  tnReference: '',
+                  fechaSolicitudMs: 0,
+                ))
+            .toList();
+
+        if (mounted) {
+          setState(() {
+            _seleccionados = placeholders;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Reemplaza placeholders o elementos antiguos por la versión presente en el índice.
+  void _reconcileSeleccionadosConIndice() {
+    if (_seleccionados.isEmpty) return;
+
+    final List<PaqueteLocal> reconciled = [];
+    final seen = <String>{};
+
+    for (final p in _seleccionados) {
+      final key = _pkKey(p);
+      final inIndex = _indexPorCodigo[key];
+
+      final chosen = inIndex ?? p; // si el índice lo tiene, usarlo
+      final k = _pkKey(chosen);
+
+      if (!seen.contains(k)) {
+        seen.add(k);
+        reconciled.add(chosen);
+      }
+    }
+
+    _codesProcesados
+      ..clear()
+      ..addAll(reconciled.map(_pkKey));
+
+    setState(() {
+      _seleccionados = reconciled;
+    });
+
+    // Persistimos la versión reconciliada (en ambas keys)
+    _persistSeleccionados();
+  }
+
+  Future<void> _borrarSeleccionadosEnPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefsSelV2ByEmbarque);
+      await prefs.remove(_prefsSelV2Stable);
+      await prefs.remove(_prefsSelV1ByEmbarque);
+      await prefs.remove(_prefsSelV1Stable);
+    } catch (_) {}
+  }
+
+  Future<void> _limpiarSeleccionados({bool mostrarAviso = true}) async {
+    setState(() {
+      _seleccionados = [];
+      _codesProcesados.clear();
+    });
+    await _borrarSeleccionadosEnPrefs();
+    if (mostrarAviso && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lista limpiada.')),
+      );
+    }
   }
 
   // ====== Ubicación al cargar ======
@@ -259,7 +409,6 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
         return;
       }
 
-      // Intento principal con timeout
       Position pos;
       try {
         pos = await Geolocator.getCurrentPosition(
@@ -267,7 +416,6 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
           timeLimit: const Duration(seconds: 12),
         );
       } on TimeoutException {
-        // Fallback a última conocida
         final last = await Geolocator.getLastKnownPosition();
         if (last == null) {
           setState(() {
@@ -294,10 +442,9 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     }
   }
 
-  // ====== Helpers de fecha requeridos ======
+  // ====== Helpers de fecha ======
   String _two(int n) => n.toString().padLeft(2, '0');
 
-  /// Convierte un timestamp en milisegundos a "YYYY-MM-DD"
   String _fmtYYYYMMDD(int ms, {bool useUtc = false}) {
     final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
     final y = dt.year.toString();
@@ -306,33 +453,30 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     return '$y-$m-$d';
   }
 
-  /// Convierte un timestamp en milisegundos a "YYYY-MM-DD HH:MM:SS"
-/// Convierte un timestamp en milisegundos a "YYYY-MM-DD HH:MM:SS"
-String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
-  final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
-  final base = _fmtYYYYMMDD(ms, useUtc: useUtc);
-  final hh = _two(dt.hour);
-  final mm = _two(dt.minute);
-  final ss = _two(dt.second);
-  return '$base $hh:$mm:$ss';
-}
-
+  String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: useUtc);
+    final base = _fmtYYYYMMDD(ms, useUtc: useUtc);
+    final hh = _two(dt.hour);
+    final mm = _two(dt.minute);
+    final ss = _two(dt.second);
+    return '$base $hh:$mm:$ss';
+  }
 
   // ====== Manejo de lista (insertar/mover al tope) ======
-  void _insertarAlTope(PaqueteLocal p, {bool mostrarAvisoSiExistia = false}) {
+  Future<void> _insertarAlTope(PaqueteLocal p, {bool mostrarAvisoSiExistia = false}) async {
     setState(() {
-      final idx = _seleccionados.indexWhere((e) => e.idGuiaPB == p.idGuiaPB);
+      final key = _pkKey(p);
+      final idx = _seleccionados.indexWhere((e) => _pkKey(e) == key);
       if (idx >= 0) {
-        // ya estaba: lo movemos al tope
-        _seleccionados.removeAt(idx);
-        _seleccionados = [p, ..._seleccionados];
+        final existing = _seleccionados.removeAt(idx);
+        _seleccionados = [existing, ..._seleccionados];
       } else {
-        // no estaba: insertamos al tope
         _seleccionados = [p, ..._seleccionados];
       }
     });
 
-    // Llevar la lista al principio suavemente
+    await _persistSeleccionados();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_listCtrl.hasClients) {
         _listCtrl.animateTo(
@@ -351,11 +495,11 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
   }
 
   // ====== Manejo de códigos ======
-  void _handleAddCode(String rawCode) {
+  Future<void> _handleAddCode(String rawCode) async {
     final code = _norm(rawCode);
     if (code.isEmpty) return;
 
-    if (_codesProcesados.contains(code)) return; // evita rebote
+    if (_codesProcesados.contains(code)) return; // evita rebote del mismo scan
     _codesProcesados.add(code);
 
     final p = _indexPorCodigo[code];
@@ -369,15 +513,13 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
       return;
     }
 
-    final idxExiste = _seleccionados.indexWhere((e) => e.idGuiaPB == p.idGuiaPB);
-    if (idxExiste >= 0) {
-      // En vez de avisar "ya fue añadido", lo movemos al tope
-      _insertarAlTope(p, mostrarAvisoSiExistia: true);
+    final existe = _seleccionados.any((e) => _pkKey(e) == _pkKey(p));
+    if (existe) {
+      await _insertarAlTope(p, mostrarAvisoSiExistia: true);
       return;
     }
 
-    // NEW: insertar el escaneado en la primera posición
-    _insertarAlTope(p);
+    await _insertarAlTope(p);
   }
 
   void _agregarPorInput() {
@@ -392,10 +534,16 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
     _buscarCtrl.clear();
   }
 
-  void _eliminarDeLista(PaqueteLocal p) {
+  Future<void> _eliminarDeLista(PaqueteLocal p) async {
     setState(() {
-      _seleccionados.removeWhere((e) => e.idGuiaPB == p.idGuiaPB);
+      final key = _pkKey(p);
+      _seleccionados.removeWhere((e) => _pkKey(e) == key);
+
+      if (p.idGuiaPB.isNotEmpty) _codesProcesados.remove(_norm(p.idGuiaPB));
+      if (p.idGuiaProveedor.isNotEmpty) _codesProcesados.remove(_norm(p.idGuiaProveedor));
+      if (p.tnReference.isNotEmpty) _codesProcesados.remove(_norm(p.tnReference));
     });
+    await _persistSeleccionados();
   }
 
   // ====== Construcción y envío al Webhook ======
@@ -462,10 +610,8 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
           const SnackBar(content: Text('Información enviada')),
         );
 
-        setState(() {
-          _seleccionados = [];
-          _codesProcesados.clear();
-        });
+        // Limpiamos lista + almacenamiento (estable y por-embarque)
+        await _limpiarSeleccionados(mostrarAviso: false);
 
         await Future.delayed(const Duration(milliseconds: 400));
         if (!mounted) return;
@@ -537,12 +683,10 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
   Future<void> _abrirCerrarConFirma() async {
     final hoyYYYYMMDD = _fmtYYYYMMDD(DateTime.now().millisecondsSinceEpoch);
 
-    // Ruta RTDB a escuchar:
     final firmaRef = FirebaseDatabase.instance.ref(
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/FirmasProveedor/$hoyYYYYMMDD/Embarque/${widget.embarqueMs}',
     );
 
-    // Reset y escucha
     _firmaSub?.cancel();
     _firmadoEnviado = false;
     _firmaSub = firmaRef.onValue.listen((event) async {
@@ -554,7 +698,6 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
         final dynamic candidate = m['Url'] ?? m['url'] ?? m['URL'];
         if (candidate != null) urlFirma = candidate.toString();
       } else if (val is String) {
-        // por si el nodo es directamente la URL
         urlFirma = val;
       }
 
@@ -563,24 +706,21 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
           !_firmadoEnviado) {
         _firmadoEnviado = true;
 
-        // cerrar el sheet si está abierto
         if (mounted && Navigator.of(context).canPop()) {
-          Navigator.of(context).pop(); // cierra el bottom sheet
+          Navigator.of(context).pop();
         }
 
-        // Enviar al webhook con UrlFirma
         await _postWebhook(urlFirma: urlFirma);
       }
     });
 
-    // Abrir el WebView en un bottom sheet
     final urlWeb =
         'https://primebox.mx/dashboard/app/Views/view_firma_embarque?idEmbarque=${widget.embarqueMs}&idFecha=$hoyYYYYMMDD';
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      enableDrag: false,        // para permitir dibujar en el canvas de firma
+      enableDrag: false,
       isDismissible: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
@@ -624,7 +764,6 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
       },
     );
 
-    // Al cerrar el sheet, cancelar la suscripción
     _firmaSub?.cancel();
     _firmaSub = null;
   }
@@ -632,7 +771,9 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
   // ======== UI ========
   @override
   Widget build(BuildContext context) {
-    if (_loadingData) {
+    final showingSkeleton = _loadingData && _seleccionados.isEmpty;
+
+    if (showingSkeleton) {
       return Scaffold(
         backgroundColor: Colors.white,
         body: SafeArea(
@@ -677,61 +818,88 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    height: 40,
-                    child: Stack(
-                      children: [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Material(
-                            color: Colors.white.withOpacity(0.18),
-                            borderRadius: BorderRadius.circular(10),
-                            child: InkWell(
-                              onTap: () => Navigator.pop(context),
-                              borderRadius: BorderRadius.circular(10),
-                              child: const SizedBox(
-                                width: 36,
-                                height: 36,
-                                child: Icon(Icons.arrow_back_ios_new_rounded,
-                                    size: 18, color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const Align(
-                          alignment: Alignment.center,
-                          child: Text(
-                            'Recolección de paquetes',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.18),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Center(
-                              child: Text(
-                                '$count',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                 SizedBox(
+  height: 40,
+  child: Row(
+    children: [
+      // Botón regresar (igual que antes)
+      Material(
+        color: Colors.white.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: () => Navigator.pop(context),
+          borderRadius: BorderRadius.circular(10),
+          child: const SizedBox(
+            width: 36,
+            height: 36,
+            child: Icon(Icons.arrow_back_ios_new_rounded,
+                size: 18, color: Colors.white),
+          ),
+        ),
+      ),
+
+      const SizedBox(width: 8),
+
+      // Título alineado a la izquierda, con elipsis si hace falta
+      const Expanded(
+        child: Text(
+          'Recolección de paquetes',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+          ),
+        ),
+      ),
+
+      const SizedBox(width: 8),
+
+      // Acciones de la derecha (tachito + contador)
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: Colors.white.withOpacity(0.18),
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              onTap: _seleccionados.isEmpty ? null : () => _limpiarSeleccionados(),
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: 36,
+                height: 36,
+                child: Icon(
+                  Icons.delete_outline,
+                  color: _seleccionados.isEmpty ? Colors.white38 : Colors.white,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Text(
+                '${_seleccionados.length}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ],
+  ),
+),
+
                   const SizedBox(height: 12),
 
                   // ====== Escáner embebido ======
@@ -775,7 +943,7 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
                   ),
                   const SizedBox(height: 10),
 
-                  // ====== GPS mostrado como texto (precargado) ======
+                  // ====== GPS (precargado) ======
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -810,7 +978,7 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
                   ),
                   const SizedBox(height: 10),
 
-                  // Buscador + botón 3 puntos (agrega por texto)
+                  // Buscador + botón agregar por texto
                   Row(
                     children: [
                       Expanded(
@@ -865,7 +1033,7 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
                       ),
                     )
                   : ListView.builder(
-                      controller: _listCtrl, // NEW
+                      controller: _listCtrl,
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 110),
                       itemCount: _seleccionados.length,
                       itemBuilder: (_, i) {
@@ -987,7 +1155,7 @@ String _fmtYYYYMMDDHHMMSS(int ms, {bool useUtc = false}) {
     _qrController!.scannedDataStream.listen((scanData) async {
       final raw = scanData.code ?? '';
       if (raw.isEmpty) return;
-      _handleAddCode(raw);
+      await _handleAddCode(raw);
     });
   }
 }

@@ -261,17 +261,40 @@ class _DelegarPaqueteEscanearPaquetesPageState
                             ),
                           ),
                         ),
-                        const Align(
-                          alignment: Alignment.center,
-                          child: Text(
-                            'Delegar paquetes',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
+                       Align(
+  alignment: Alignment.center,
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Text(
+        'Delegar paquetes',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 18,
+        ),
+      ),
+      const SizedBox(width: 8),
+      if (_paquetesData.isNotEmpty)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '${_paquetesData.length}',
+            style: const TextStyle(
+              color: Color(0xFF1955CC), // headerColor
+              fontWeight: FontWeight.w800,
+              fontSize: 13,
+            ),
+          ),
+        ),
+    ],
+  ),
+),
+
                         const Align(
                           alignment: Alignment.centerRight,
                           child: SizedBox(width: 36, height: 36),

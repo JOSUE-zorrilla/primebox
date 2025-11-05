@@ -4,7 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 
-import 'centro_boot_page.dart';
+import 'paquetes_page.dart';
 import 'register_page.dart';
 
 // ✅ Variables globales
@@ -62,16 +62,11 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       // 👉 ir a cargar centro antes de paquetes si hay ciudad
-      if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const CentroBootPage(nextRoute: '/paquetes'),
-          ),
-        );
-      } else {
-        Navigator.pushReplacementNamed(context, '/paquetes');
-      }
+  Navigator.pushReplacement(
+  context,
+  MaterialPageRoute(builder: (_) => const PaquetesPage()),
+);
+
     } else {
       await FirebaseAuth.instance.signOut();
     }
@@ -130,17 +125,11 @@ class _LoginPageState extends State<LoginPage> {
         await _cargarNombreConductor(uid);
 
         if (!mounted) return;
+Navigator.pushReplacement(
+  context,
+  MaterialPageRoute(builder: (_) => const PaquetesPage()),
+);
 
-        if (globalIdCiudad != null && globalIdCiudad!.trim().isNotEmpty) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const CentroBootPage(nextRoute: '/paquetes'),
-            ),
-          );
-        } else {
-          Navigator.pushReplacementNamed(context, '/paquetes');
-        }
       } else {
         await FirebaseAuth.instance.signOut();
         ScaffoldMessenger.of(context).showSnackBar(
