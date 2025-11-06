@@ -219,7 +219,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         'NombreUsuario': (globalNombre ?? '').toString(),
         'Timestamp': ts,
         'YYYYMMDD': ymd,
-        'YYYYDDHHMMSS': ymdhms, // según tu requerimiento exacto
+        'YYYYMMDDHHMMSS': ymdhms, // según tu requerimiento exacto
         'idAlmacen': widget.idAlmacen,
         'idCiudad': (globalIdCiudad ?? '').toString(),
         'idUsuario': (globalUserId ?? '').toString(),
@@ -591,7 +591,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                         const Align(
                           alignment: Alignment.center,
                           child: Text(
-                            'Recolección de paquetes',
+                            'Recolección de paquetes22',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,

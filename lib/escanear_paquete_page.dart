@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -44,13 +45,22 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     if (mounted) setState(() => _permissionGranted = status.isGranted);
   }
 
+  // Manejo recomendado para hot reload / reassemble
   @override
   void reassemble() {
     super.reassemble();
-    if (!_permissionGranted || _controller == null) return;
+    if (_controller == null) return;
     try {
-      _controller!.pauseCamera();
-      _controller!.resumeCamera();
+      if (Platform.isAndroid) {
+        _controller!.pauseCamera();
+      } else if (Platform.isIOS) {
+        _controller!.resumeCamera();
+      } else {
+        // fallback genérico
+        _controller!
+          ..pauseCamera()
+          ..resumeCamera();
+      }
     } catch (_) {}
   }
 
@@ -91,7 +101,7 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     if (_procesando) return;
     setState(() => _procesando = true);
 
-    // Pausa la cámara después de mostrar el contenido, para evitar ráfagas
+    // Pausa la cámara para evitar ráfagas
     try { await _controller?.pauseCamera(); } catch (_) {}
 
     try {
@@ -139,11 +149,12 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
         tnReference: (m['Referencia'] ?? '').toString(),
       );
 
-      // Limpia cámara y navega
-      try {
-         _controller?.dispose();
-      } catch (_) {}
-      _controller = null;
+// Cerrar cámara y navegar
+try {
+  _controller?.dispose(); // dispose() es síncrono en qr_code_scanner
+} catch (_) {}
+_controller = null;
+
 
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -161,14 +172,35 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
     }
   }
 
+  // Reacciona cuando el plugin confirma/deniega permiso
+  void _onPermissionSet(BuildContext context, QRViewController ctrl, bool p) async {
+    _permissionGranted = p;
+    if (!mounted) return;
+    setState(() {});
+    if (!p) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permiso de cámara denegado.')),
+      );
+      return;
+    }
+    // En algunos dispositivos hace falta forzar un resume breve
+    try {
+      await ctrl.resumeCamera();
+    } catch (_) {}
+  }
+
   void _onQRViewCreated(QRViewController controller) {
     _controller = controller;
+
+    // Importante: atar el callback de permisos del propio widget
+    controller.pauseCamera(); // brief pause para asegurar init limpio
+    controller.resumeCamera();
 
     controller.scannedDataStream.listen((scan) {
       final code = scan.code?.trim() ?? '';
       if (code.isEmpty) return;
 
-      // feedback instantáneo (sin bloquear)
+      // feedback instantáneo (no bloquea)
       _mostrarContenidoInstantaneo(code);
 
       // control de ráfagas / reprocesado
@@ -182,7 +214,7 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
       _ultimoCodigoProcesado = code;
       _ultimoMomentoProcesado = ahora;
 
-      // continúa con la lógica normal en segundo plano
+      // continúa con la lógica normal
       _handleCode(code);
     });
   }
@@ -197,73 +229,103 @@ class _EscanearPaquetePageState extends State<EscanearPaquetePage> {
 
   @override
   Widget build(BuildContext context) {
+    final body = !_permissionGranted
+        ? const Center(child: Text('Se requiere permiso de cámara para escanear.'))
+        : Stack(
+            children: [
+              // Vista de cámara
+              QRView(
+                key: qrKey,
+                onQRViewCreated: _onQRViewCreated,
+                onPermissionSet: (ctrl, p) => _onPermissionSet(context, ctrl, p),
+                cameraFacing: CameraFacing.back,
+                formatsAllowed: const [
+                  BarcodeFormat.qrcode,
+                  BarcodeFormat.code128,
+                  BarcodeFormat.code39,
+                  BarcodeFormat.code93,
+                  BarcodeFormat.dataMatrix,
+                  BarcodeFormat.pdf417,
+                  BarcodeFormat.aztec,
+                  BarcodeFormat.ean13,
+                  BarcodeFormat.ean8,
+                  BarcodeFormat.upcA,
+                  BarcodeFormat.upcE,
+                  BarcodeFormat.codabar,
+                  BarcodeFormat.itf,
+                  // Si tu versión del plugin soporta maxiCode, descomenta:
+                  // BarcodeFormat.maxiCode,
+                ],
+                overlay: QrScannerOverlayShape(
+                  borderColor: Colors.white,
+                  borderRadius: 8,
+                  borderLength: 20,
+                  borderWidth: 6,
+                  cutOutWidth: MediaQuery.of(context).size.width * 0.78,
+                  cutOutHeight: MediaQuery.of(context).size.width * 0.50,
+                ),
+              ),
+
+              // Indicador de procesamiento en overlay (no bloquea el banner)
+              if (_procesando)
+                IgnorePointer(
+                  child: Container(
+                    color: Colors.black26,
+                    alignment: Alignment.center,
+                    child: const CircularProgressIndicator(),
+                  ),
+                ),
+
+              // Banner superior con el contenido del QR (aparece al instante)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOut,
+                left: 0,
+                right: 0,
+                top: _mostrarBanner ? 0 : -80,
+                child: SafeArea(
+                  child: Container(
+                    margin: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: DefaultTextStyle(
+                      style: const TextStyle(color: Colors.white),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.qr_code, color: Colors.white),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Código detectado',
+                                    style: TextStyle(fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _scanTexto,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+
     return Scaffold(
       appBar: AppBar(title: const Text('Escanear código')),
-      body: !_permissionGranted
-          ? const Center(child: Text('Se requiere permiso de cámara para escanear.'))
-          : Stack(
-              children: [
-                // Vista de cámara
-                QRView(
-                  key: qrKey,
-                  onQRViewCreated: _onQRViewCreated,
-                ),
-
-                // Indicador de procesamiento en overlay (no bloquea el banner)
-                if (_procesando)
-                  IgnorePointer(
-                    child: Container(
-                      color: Colors.black26,
-                      alignment: Alignment.center,
-                      child: const CircularProgressIndicator(),
-                    ),
-                  ),
-
-                // Banner superior con el contenido del QR (aparece al instante)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 150),
-                  curve: Curves.easeOut,
-                  left: 0,
-                  right: 0,
-                  top: _mostrarBanner ? 0 : -80,
-                  child: SafeArea(
-                    child: Container(
-                      margin: const EdgeInsets.all(12),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: DefaultTextStyle(
-                        style: const TextStyle(color: Colors.white),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.qr_code, color: Colors.white),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Código detectado',
-                                      style: TextStyle(fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _scanTexto,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+      body: body,
     );
   }
 }
+
