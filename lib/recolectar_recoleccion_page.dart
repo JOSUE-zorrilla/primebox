@@ -801,6 +801,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF2F3F7),
+      resizeToAvoidBottomInset: true, // importante para mover contenido con teclado
       body: SafeArea(
         child: Column(
           children: [
@@ -886,7 +887,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
             ),
             child: Center(
               child: Text(
-                '${_seleccionados.length}',
+                '$count',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
@@ -1069,58 +1070,12 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
         ),
       ),
 
-      // ===== Botones inferiores =====
-      bottomSheet: SafeArea(
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          color: const Color(0xFFF2F3F7),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _abrirCerrarConFirma,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: const BorderSide(color: Color(0xFF2B59F2)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Cerrar con firma',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF2B59F2),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _seleccionados.isEmpty ? null : _finalizarRecoleccion,
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: _seleccionados.isEmpty
-                        ? Colors.black26
-                        : const Color(0xFF2B59F2),
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Finalizar',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+      // ===== Barra inferior fija =====
+      bottomNavigationBar: _BottomBar(
+        isEmpty: _seleccionados.isEmpty,
+        onFirmar: _abrirCerrarConFirma,
+        onFinalizar: _finalizarRecoleccion,
+        background: const Color(0xFFF2F3F7),
       ),
     );
   }
@@ -1157,5 +1112,89 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       if (raw.isEmpty) return;
       await _handleAddCode(raw);
     });
+  }
+}
+
+/// Barra inferior segura para Android/iOS.
+/// Se apoya en SafeArea y AnimatedPadding para:
+///  - despegarse del sistema (gestos/nav bar)
+///  - subir cuando aparece el teclado
+class _BottomBar extends StatelessWidget {
+  final bool isEmpty;
+  final VoidCallback onFirmar;
+  final VoidCallback onFinalizar;
+  final Color background;
+
+  const _BottomBar({
+    required this.isEmpty,
+    required this.onFirmar,
+    required this.onFinalizar,
+    required this.background,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final insets = MediaQuery.of(context).viewInsets.bottom; // teclado
+    return Material(
+      elevation: 8,
+      color: background,
+      child: SafeArea(
+        top: false,
+        child: AnimatedPadding(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.decelerate,
+          padding: EdgeInsets.only(bottom: insets > 0 ? insets : 0),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: onFirmar,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: const BorderSide(color: Color(0xFF2B59F2)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Cerrar con firma',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2B59F2),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: isEmpty ? null : onFinalizar,
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor:
+                          isEmpty ? Colors.black26 : const Color(0xFF2B59F2),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Finalizar',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
