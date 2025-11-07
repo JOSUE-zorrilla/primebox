@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'paquetes_page.dart';
 import 'register_page.dart';
+import 'reset_password_page.dart'; // ⬅️ NUEVO IMPORT
 
 // ✅ Variables globales
 String? globalUserId;
@@ -43,7 +44,6 @@ class _LoginPageState extends State<LoginPage> {
 
     final uid = user.uid;
 
-    // 🔹 Siempre leeremos customData para validar y para sacar idCiudad
     final DatabaseReference customRef = FirebaseDatabase.instance.ref(
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
     );
@@ -52,36 +52,26 @@ class _LoginPageState extends State<LoginPage> {
 
     if (customSnap.exists && customSnap.child('TipoPerfil').value == 'Driver') {
       globalUserId = uid;
-
-      // ⬇️ idCiudad ahora sale de customData (no de Conductores)
       globalIdCiudad = _leerIdCiudadDesdeCustom(customSnap);
-
-      // (opcional) seguir cargando el Nombre desde Conductores
       await _cargarNombreConductor(uid);
 
       if (!mounted) return;
-
-      // 👉 ir a cargar centro antes de paquetes si hay ciudad
-  Navigator.pushReplacement(
-  context,
-  MaterialPageRoute(builder: (_) => const PaquetesPage()),
-);
-
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const PaquetesPage()),
+      );
     } else {
       await FirebaseAuth.instance.signOut();
     }
   }
 
-  /// Extrae idCiudad de un snapshot de customData, tolerando diferentes claves
   String? _leerIdCiudadDesdeCustom(DataSnapshot customSnap) {
-    // Soporta 'idCiudad' o 'IdCiudad' por si acaso
     final v1 = customSnap.child('idCiudad').value?.toString();
     final v2 = customSnap.child('IdCiudad').value?.toString();
     final raw = (v1 ?? v2)?.trim();
     return (raw == null || raw.isEmpty) ? null : raw;
   }
 
-  /// Ahora solo carga el Nombre desde Conductores (idCiudad ya no se saca de aquí)
   Future<void> _cargarNombreConductor(String uid) async {
     final DatabaseReference conductorRef = FirebaseDatabase.instance.ref(
       'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Conductores/$uid',
@@ -108,7 +98,6 @@ class _LoginPageState extends State<LoginPage> {
       final uid = credential.user?.uid;
       if (uid == null) throw Exception('UID no encontrado');
 
-      // 🔹 Leer customData para validar perfil y obtener idCiudad
       final DatabaseReference customRef = FirebaseDatabase.instance.ref(
         'projects/proj_bt5YXxta3UeFNhYLsJMtiL/apps/app_19PX2WeHAwM8ejcWQ3jFCd/members/$uid/customData',
       );
@@ -117,19 +106,14 @@ class _LoginPageState extends State<LoginPage> {
 
       if (customSnap.exists && customSnap.child('TipoPerfil').value == 'Driver') {
         globalUserId = uid;
-
-        // ⬇️ idCiudad desde customData
         globalIdCiudad = _leerIdCiudadDesdeCustom(customSnap);
-
-        // (opcional) nombre desde Conductores
         await _cargarNombreConductor(uid);
 
         if (!mounted) return;
-Navigator.pushReplacement(
-  context,
-  MaterialPageRoute(builder: (_) => const PaquetesPage()),
-);
-
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const PaquetesPage()),
+        );
       } else {
         await FirebaseAuth.instance.signOut();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -278,7 +262,15 @@ Navigator.pushReplacement(
                             const SizedBox(height: 16),
                             Center(
                               child: TextButton(
-                                onPressed: () {},
+                                // ⬇️ AHORA ABRE LA PANTALLA DE RECUPERACIÓN
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ResetPasswordPage(),
+                                    ),
+                                  );
+                                },
                                 style: TextButton.styleFrom(
                                   foregroundColor: const Color(0xFF3771E6),
                                   padding: const EdgeInsets.symmetric(horizontal: 8),
