@@ -64,6 +64,9 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   // NUEVO: switch para habilitar INE
   bool _ineHabilitado = false;
 
+  // NUEVO: estado de envío al webhook
+  bool _enviando = false;
+
   List<String> _guiasMulti = [];
 
   final List<String> _opciones = const [
@@ -469,11 +472,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       backgroundColor: Colors.white, // FONDO BLANCO
       appBar: AppBar(
         systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.white,             // fondo blanco en status bar
+          statusBarColor: Colors.white, // fondo blanco en status bar
           statusBarIconBrightness: Brightness.dark, // íconos oscuros (Android)
-          statusBarBrightness: Brightness.light,    // iOS: texto oscuro
+          statusBarBrightness: Brightness.light, // iOS: texto oscuro
         ),
-        backgroundColor: Colors.white,              // APPBAR BLANCO
+        backgroundColor: Colors.white, // APPBAR BLANCO
         foregroundColor: brand,
         elevation: 0,
         centerTitle: true,
@@ -524,274 +527,341 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
           )
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: ListView(
-            padding: const EdgeInsets.all(14),
-            children: [
-              // --- SECCIÓN PRINCIPAL (sin card, todo blanco) ---
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Teléfono + acciones
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Teléfono:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                            const SizedBox(height: 2),
-                            Text(widget.telefono, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                      _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
-                      const SizedBox(width: 8),
-                      _chipButton(
-                        icon: FontAwesomeIcons.whatsapp,
-                        label: '',
-                        onTap: _enviarWhatsApp,
-                        color: const Color(0xFF25D366),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  // Guía / Titular
-                  const Text('No. Guía:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                  const SizedBox(height: 2),
-                  Text(widget.tnReference, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 10),
-
-                  const Text('Titular:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                  const SizedBox(height: 2),
-                  Text(widget.destinatario, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 6),
-
-                  if (_idEmpresa != null)
-                    Text('Empresa: ${_idEmpresa!}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-
-                  const SizedBox(height: 16),
-
-                  _sectionTitle('¿Quién lo recibió?'),
-                  DropdownButtonFormField<String>(
-                    value: _opcionSeleccionada,
-                    decoration: _input('Parentesco'),
-                    items: _opciones
-                        .map((opcion) => DropdownMenuItem(value: opcion, child: Text(opcion)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _opcionSeleccionada = v!),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _quienRecibeController,
-                    decoration: _input('Nombre de quien recibe'),
-                  ),
-
-                  const SizedBox(height: 16),
-                  _sectionTitle('Captura de Evidencia'),
-
-                  // Caja punteada con 3 cuadritos (sin botones)
-                  _dashedBox(
-                    child: Column(
+      body: SafeArea( // 👉 asegura que el botón no quede debajo de las teclas de Android
+        top: false,
+        bottom: true,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: ListView(
+              padding: const EdgeInsets.all(14),
+              children: [
+                // --- SECCIÓN PRINCIPAL (sin card, todo blanco) ---
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Teléfono + acciones
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 6),
-                        const Icon(Icons.cloud_upload_outlined, size: 42, color: Colors.black87),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Selecciona o arrastra tus imágenes o video',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Teléfono:',
+                                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+                              const SizedBox(height: 2),
+                              Text(widget.telefono,
+                                  style: const TextStyle(fontWeight: FontWeight.w600)),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        const Text(
-                          '(Png y Jpg máx 1gb)',
-                          style: TextStyle(fontSize: 11, color: Colors.black54),
+                        _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
+                        const SizedBox(width: 8),
+                        _chipButton(
+                          icon: FontAwesomeIcons.whatsapp,
+                          label: '',
+                          onTap: _enviarWhatsApp,
+                          color: const Color(0xFF25D366),
                         ),
-                        const SizedBox(height: 12),
-
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: List.generate(3, (i) => _photoSlot(i)),
-                        ),
-
-                        // 🔒 Aviso visual cuando NO hay imágenes aún
-                        if (!_tieneAlMenosUnaImagen) ...[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Debes adjuntar al menos 1 imagen para poder guardar.',
-                            style: TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.w600),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-
-                        const SizedBox(height: 10),
-                        // NUEVO: Switch para INE
-                        SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Adjuntar INE (opcional)',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
-                          value: _ineHabilitado,
-                          onChanged: (v) => setState(() => _ineHabilitado = v),
-                        ),
-
-                        // Si el switch está activo, mostramos un cuarto slot para INE
-                        if (_ineHabilitado) ...[
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: _photoSlot(3, label: 'INE'),
-                          ),
-                        ],
                       ],
                     ),
-                  ),
 
-                  const SizedBox(height: 16),
-                  _sectionTitle('Nota Extra'),
-                  TextField(
-                    controller: _notaController,
-                    maxLines: 4,
-                    decoration: _input('Escribe tus observaciones...'),
-                  ),
+                    const SizedBox(height: 14),
 
-                  if (_guiasMulti.isNotEmpty) ...[
+                    // Guía / Titular
+                    const Text('No. Guía:',
+                        style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 2),
+                    Text(widget.tnReference,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 10),
+
+                    const Text('Titular:',
+                        style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const SizedBox(height: 2),
+                    Text(widget.destinatario,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+
+                    if (_idEmpresa != null)
+                      Text('Empresa: ${_idEmpresa!}',
+                          style: const TextStyle(fontSize: 12, color: Colors.black54)),
+
                     const SizedBox(height: 16),
-                    _sectionTitle('Guías asociadas'),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF9FAFB),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFE6E6E6)),
-                      ),
+
+                    _sectionTitle('¿Quién lo recibió?'),
+                    DropdownButtonFormField<String>(
+                      value: _opcionSeleccionada,
+                      decoration: _input('Parentesco'),
+                      items: _opciones
+                          .map((opcion) =>
+                              DropdownMenuItem(value: opcion, child: Text(opcion)))
+                          .toList(),
+                      onChanged: (v) => setState(() => _opcionSeleccionada = v!),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _quienRecibeController,
+                      decoration: _input('Nombre de quien recibe'),
+                    ),
+
+                    const SizedBox(height: 16),
+                    _sectionTitle('Captura de Evidencia'),
+
+                    // Caja punteada con 3 cuadritos (sin botones)
+                    _dashedBox(
                       child: Column(
-                        children: _guiasMulti
-                            .map((id) => ListTile(
-                                  dense: true,
-                                  leading: const Icon(Icons.qr_code_2_outlined),
-                                  title: Text(id),
-                                ))
-                            .toList(),
+                        children: [
+                          const SizedBox(height: 6),
+                          const Icon(Icons.cloud_upload_outlined,
+                              size: 42, color: Colors.black87),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Selecciona o arrastra tus imágenes o video',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.black87,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            '(Png y Jpg máx 1gb)',
+                            style:
+                                TextStyle(fontSize: 11, color: Colors.black54),
+                          ),
+                          const SizedBox(height: 12),
+
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: List.generate(3, (i) => _photoSlot(i)),
+                          ),
+
+                          // 🔒 Aviso visual cuando NO hay imágenes aún
+                          if (!_tieneAlMenosUnaImagen) ...[
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Debes adjuntar al menos 1 imagen para poder guardar.',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.redAccent,
+                                  fontWeight: FontWeight.w600),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+
+                          const SizedBox(height: 10),
+                          // NUEVO: Switch para INE
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Adjuntar INE (opcional)',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                            value: _ineHabilitado,
+                            onChanged: (v) =>
+                                setState(() => _ineHabilitado = v),
+                          ),
+
+                          // Si el switch está activo, mostramos un cuarto slot para INE
+                          if (_ineHabilitado) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: _photoSlot(3, label: 'INE'),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
+
+                    const SizedBox(height: 16),
+                    _sectionTitle('Nota Extra'),
+                    TextField(
+                      controller: _notaController,
+                      maxLines: 4,
+                      decoration: _input('Escribe tus observaciones...'),
+                    ),
+
+                    if (_guiasMulti.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _sectionTitle('Guías asociadas'),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE6E6E6)),
+                        ),
+                        child: Column(
+                          children: _guiasMulti
+                              .map((id) => ListTile(
+                                    dense: true,
+                                    leading:
+                                        const Icon(Icons.qr_code_2_outlined),
+                                    title: Text(id),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              // ---- BOTÓN PRIMARIO (Guardar) ----
-              SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  // 🔒 Deshabilitar si no hay al menos 1 imagen
-                  onPressed: _tieneAlMenosUnaImagen
-                      ? () async {
-                          // 🔒 Doble chequeo por seguridad (evita condiciones de carrera)
-                          if (!_tieneAlMenosUnaImagen) {
-                            _snack('Debes adjuntar al menos 1 imagen para poder guardar.');
-                            return;
-                          }
-
-                          // ---------- LÓGICA ORIGINAL + INE ----------
-                          final timestamp = DateTime.now();
-                          final yyyyMMdd = DateFormat('yyyy-MM-dd').format(timestamp);
-                          final yyyyMMddHHmmss = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp);
-
-                          final recibe = _quienRecibeController.text.trim();
-                          final parentesco = _opcionSeleccionada;
-                          final nota = _notaController.text.trim();
-
-                          final alMenosUnaFoto =
-                              _urlImagen1 != null || _urlImagen2 != null || _urlImagen3 != null || _urlImagen4 != null;
-
-                          final estadoFoto = alMenosUnaFoto
-                              ? "el usuario dejó tomarse la foto"
-                              : "el usuario no se dejó tomar la foto";
-
-                          final tieneIne = (_urlImagen4 != null && _urlImagen4!.isNotEmpty);
-                          final estadoIne = tieneIne ? "con INE" : "sin INE";
-
-                          final textoNota =
-                              "Recibe: $parentesco con nombre $recibe, $estadoFoto, $estadoIne${nota.isNotEmpty ? ', $nota' : ''}";
-
-                          // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
-                          final String idRegistro = Uri.decodeFull(widget.id).trim();
-                          final List<String> fuentes = _guiasMulti.isNotEmpty ? _guiasMulti : [idRegistro];
-
-                          // Opcional: deduplicar por si se repite algo
-                          final Set<String> unicas = fuentes.map((e) => e.trim()).toSet();
-
-                          final Map<String, dynamic> dataPayload = {
-                            for (final guia in unicas) guia: {'idGuia': guia}
-                          };
-
-                          final body = {
-                            "Evidencia1": _urlImagen1 ?? "",
-                            "Evidencia2": _urlImagen2 ?? "",
-                            "Evidencia3": _urlImagen3 ?? "",
-                            "Evidencia4": _urlImagen4 ?? "", // NUEVO: INE
-                            "Latitude": _posicionActual?.latitude.toString() ?? "",
-                            "Longitude": _posicionActual?.longitude.toString() ?? "",
-                            "NombreDriver": globalNombre ?? "SinNombre",
-                            "Nota": textoNota,
-                            "TimeStamp": DateTime.now().millisecondsSinceEpoch,
-                            "Parentesco": parentesco,
-                            "NombreRecibe": recibe,
-                            "YYYYMMDD": yyyyMMdd,
-                            "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
-                            "idDriver": globalUserId ?? "",
-                            "data": dataPayload,
-                          };
-
-                          try {
-                            const webhookUrl = "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
-
-                            final response = await http.post(
-                              Uri.parse(webhookUrl),
-                              headers: {HttpHeaders.contentTypeHeader: 'application/json'},
-                              body: jsonEncode(body),
-                            );
-
-                            if (!mounted) return;
-
-                            if (response.statusCode == 200) {
-                              _snack('Información enviada exitosamente');
-                            } else {
-                              _snack('Error al enviar: ${response.body}');
-                            }
-                          } catch (e) {
-                            if (!mounted) return;
-                            _snack('Error de red: $e');
-                          }
-
-                          if (mounted) Navigator.pop(context);
-                          // ---------- FIN LÓGICA ----------
-                        }
-                      : null, // 👉 desactivado si no hay imagen
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: brand,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                    elevation: 0,
-                    // 🔒 Visual: reduce opacidad cuando esté deshabilitado
-                    disabledBackgroundColor: brand.withOpacity(0.35),
-                    disabledForegroundColor: Colors.white70,
-                  ),
-                  child: const Text('Guardar'),
                 ),
-              ),
-              const SizedBox(height: 8),
-            ],
+
+                const SizedBox(height: 14),
+
+                // ---- BOTÓN PRIMARIO (Guardar) ----
+                SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    // 🔒 Deshabilitar si no hay al menos 1 imagen o si está enviando
+                    onPressed: (_tieneAlMenosUnaImagen && !_enviando)
+                        ? () async {
+                            // 🔒 Doble chequeo por seguridad
+                            if (!_tieneAlMenosUnaImagen) {
+                              _snack(
+                                  'Debes adjuntar al menos 1 imagen para poder guardar.');
+                              return;
+                            }
+
+                            setState(() => _enviando = true);
+
+                            final timestamp = DateTime.now();
+                            final yyyyMMdd =
+                                DateFormat('yyyy-MM-dd').format(timestamp);
+                            final yyyyMMddHHmmss =
+                                DateFormat('yyyy-MM-dd HH:mm:ss')
+                                    .format(timestamp);
+
+                            final recibe =
+                                _quienRecibeController.text.trim();
+                            final parentesco = _opcionSeleccionada;
+                            final nota = _notaController.text.trim();
+
+                            final alMenosUnaFoto = _urlImagen1 != null ||
+                                _urlImagen2 != null ||
+                                _urlImagen3 != null ||
+                                _urlImagen4 != null;
+
+                            final estadoFoto = alMenosUnaFoto
+                                ? "el usuario dejó tomarse la foto"
+                                : "el usuario no se dejó tomar la foto";
+
+                            final tieneIne = (_urlImagen4 != null &&
+                                _urlImagen4!.isNotEmpty);
+                            final estadoIne =
+                                tieneIne ? "con INE" : "sin INE";
+
+                            final textoNota =
+                                "Recibe: $parentesco con nombre $recibe, $estadoFoto, $estadoIne${nota.isNotEmpty ? ', $nota' : ''}";
+
+                            // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
+                            final String idRegistro =
+                                Uri.decodeFull(widget.id).trim();
+                            final List<String> fuentes = _guiasMulti.isNotEmpty
+                                ? _guiasMulti
+                                : [idRegistro];
+
+                            // Opcional: deduplicar por si se repite algo
+                            final Set<String> unicas =
+                                fuentes.map((e) => e.trim()).toSet();
+
+                            final Map<String, dynamic> dataPayload = {
+                              for (final guia in unicas)
+                                guia: {'idGuia': guia}
+                            };
+
+                            final body = {
+                              "Evidencia1": _urlImagen1 ?? "",
+                              "Evidencia2": _urlImagen2 ?? "",
+                              "Evidencia3": _urlImagen3 ?? "",
+                              "Evidencia4": _urlImagen4 ?? "", // NUEVO: INE
+                              "Latitude":
+                                  _posicionActual?.latitude.toString() ?? "",
+                              "Longitude":
+                                  _posicionActual?.longitude.toString() ?? "",
+                              "NombreDriver":
+                                  globalNombre ?? "SinNombre",
+                              "Nota": textoNota,
+                              "TimeStamp":
+                                  DateTime.now().millisecondsSinceEpoch,
+                              "Parentesco": parentesco,
+                              "NombreRecibe": recibe,
+                              "YYYYMMDD": yyyyMMdd,
+                              "YYYYMMDDHHMMSS": yyyyMMddHHmmss,
+                              "idDriver": globalUserId ?? "",
+                              "data": dataPayload,
+                            };
+
+                            try {
+                              const webhookUrl =
+                                  "https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_dyuvUsB3QWxNmTdHi7qMfT";
+
+                              final response = await http.post(
+                                Uri.parse(webhookUrl),
+                                headers: {
+                                  HttpHeaders.contentTypeHeader:
+                                      'application/json'
+                                },
+                                body: jsonEncode(body),
+                              );
+
+                              if (!mounted) return;
+
+                              if (response.statusCode == 200) {
+                                _snack(
+                                    'Información enviada exitosamente');
+                                // 👉 Solo volvemos atrás cuando todo termina bien
+                                Navigator.pop(context);
+                              } else {
+                                _snack(
+                                    'Error al enviar: ${response.body}');
+                              }
+                            } catch (e) {
+                              if (!mounted) return;
+                              _snack('Error de red: $e');
+                            } finally {
+                              if (mounted) {
+                                setState(() => _enviando = false);
+                              }
+                            }
+                          }
+                        : null, // 👉 desactivado si no hay imagen o si está enviando
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: brand,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      textStyle: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 16),
+                      elevation: 0,
+                      // 🔒 Visual: reduce opacidad cuando esté deshabilitado
+                      disabledBackgroundColor: brand.withOpacity(0.35),
+                      disabledForegroundColor: Colors.white70,
+                    ),
+                    child: _enviando
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Text('Enviando...'),
+                            ],
+                          )
+                        : const Text('Guardar'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         ),
       ),
@@ -832,7 +902,8 @@ class _DashedRectPainter extends CustomPainter {
           isHorizontal ? (end.dx - start.dx).abs() : (end.dy - start.dy).abs();
       double drawn = 0.0;
       while (drawn < length) {
-        final double next = ((drawn + dashWidth).clamp(0.0, length)).toDouble();
+        final double next =
+            ((drawn + dashWidth).clamp(0.0, length)).toDouble();
         final Offset p1 = isHorizontal
             ? Offset(start.dx + drawn, start.dy)
             : Offset(start.dx, start.dy + drawn);

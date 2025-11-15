@@ -1,4 +1,5 @@
 // devolucion_formulario_page.dart
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,11 +7,23 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+
 import 'login_page.dart' show globalNombre, globalUserId;
 
+
+
 class DevolucionFormularioPage extends StatefulWidget {
-  final String idGuia;
-  const DevolucionFormularioPage({super.key, required this.idGuia});
+  final String idGuia;       // ÚNICO id escaneado
+  final String? idEmpresa;   // Si lo tienes, pásalo aquí
+
+  const DevolucionFormularioPage({
+    super.key,
+    required this.idGuia,
+    this.idEmpresa,
+  });
 
   @override
   State<DevolucionFormularioPage> createState() => _DevolucionFormularioPageState();
@@ -23,6 +36,7 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
 
   File? _imagen;
   bool _subiendo = false;
+  bool _notificarEmpresa = false; // Switch
 
   final _picker = ImagePicker();
 
@@ -43,10 +57,11 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
     if (x != null) setState(() => _imagen = File(x.path));
   }
 
-  String _fmt(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
+  String _fmtFull(DateTime dt) => DateFormat('yyyy-MM-dd HH:mm:ss').format(dt);
+  String _fmtDay(DateTime dt) => DateFormat('yyyy-MM-dd').format(dt);
 
   Future<String> _subirFoto(String idGuia) async {
-    if (_imagen == null) throw 'No hay imagen seleccionada';
+    if (_imagen == null) throw 'Debes adjuntar una foto de evidencia.';
     final ts = DateTime.now().millisecondsSinceEpoch;
     final ref = FirebaseStorage.instance
         .ref()
@@ -60,9 +75,113 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
     return url;
   }
 
+  /// data con SOLO el id escaneado:
+  /// {
+  ///   "<idGuia>": { "idGuia": "<idGuia>", "Motivo": "<motivo>" }
+  /// }
+  Map<String, dynamic> _buildDataSingle() {
+    final motivo = _motivoCtrl.text.trim();
+    final g = widget.idGuia;
+    return {
+      g: {
+        "idGuia": g,
+        "Motivo": motivo,
+      }
+    };
+  }
+
+  Future<Map<String, dynamic>> _obtenerGeoYDireccion() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) throw 'Los servicios de ubicación están desactivados.';
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied) {
+      throw 'Permiso de ubicación denegado.';
+    }
+    if (permission == LocationPermission.deniedForever) {
+      throw 'Permiso de ubicación denegado permanentemente.';
+    }
+
+    final pos = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+    String direccion = '';
+    if (placemarks.isNotEmpty) {
+      final p = placemarks.first;
+      final partes = <String>[
+        p.street ?? '',
+        p.subLocality ?? '',
+        p.locality ?? '',
+        p.administrativeArea ?? '',
+        p.postalCode ?? '',
+        p.country ?? '',
+      ]..removeWhere((s) => s.trim().isEmpty);
+      direccion = partes.join(', ');
+    }
+
+    return {
+      'lat': pos.latitude,
+      'lon': pos.longitude,
+      'direccion': direccion.isNotEmpty ? direccion : 'Dirección no disponible',
+    };
+  }
+
+  /// Enviar al webhook con geolocalización, dirección e imagen
+  Future<void> _enviarWebhook({
+    required String fotoUrl,
+    required String direccion,
+    required double lat,
+    required double lon,
+    required Map<String, dynamic> data,
+  }) async {
+    final now = DateTime.now();
+    final ts = now.millisecondsSinceEpoch;
+
+    final payload = {
+      'Direccion': direccion,
+      'FotoComprobante': fotoUrl,
+      'Latitude': lat,
+      'Longitude': lon,
+      'MotivoDev': _motivoCtrl.text.trim(),
+      'NombreUsuario': (globalNombre?.trim().isNotEmpty ?? false) ? globalNombre : 'SinNombre',
+      'Timestamp': ts,
+      'YYYYMMDD': _fmtDay(now),
+      'YYYYMMDDHHMMSS': _fmtFull(now),
+      'idEmbarque': ts,
+      'idEmpresa': (widget.idEmpresa?.trim().isNotEmpty ?? false) ? widget.idEmpresa : 'SIN_EMPRESA',
+      'idUsuario': (globalUserId?.trim().isNotEmpty ?? false) ? globalUserId : 'SIN_UID',
+      'data': data, // SOLO el idGuia escaneado
+    };
+
+    // 🔧 Endpoint corregido: Apphive Webhook (el de Cloud Run devolvía 404 "Cannot POST /hook/...").
+    final uri = Uri.parse('https://appprocesswebhook-l2fqkwkpiq-uc.a.run.app/ccp_rCqKrsavcb4RjVeFgRjNRc');
+
+    final resp = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw 'Webhook respondió ${resp.statusCode}: ${resp.body}';
+    }
+  }
+
   Future<void> _finalizar() async {
-    final ok = _formKey.currentState?.validate() ?? false;
-    if (!ok) return;
+    // Validaciones condicionales:
+    // - Si _notificarEmpresa == true => validar campos de texto (responsable y motivo)
+    // - Si _notificarEmpresa == false => no validar esos campos.
+    if (_notificarEmpresa) {
+      final ok = _formKey.currentState?.validate() ?? false;
+      if (!ok) return;
+    }
+
+    // La foto es requerida en ambos casos
     if (_imagen == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Debes cargar una imagen de evidencia.')),
@@ -73,40 +192,72 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
     setState(() => _subiendo = true);
 
     try {
+      // Subir la imagen para tener URL
       final fotoUrl = await _subirFoto(widget.idGuia);
-
       final now = DateTime.now();
-      final fecha = _fmt(now);
+      final fecha = _fmtFull(now);
 
-      final movimientosRef = FirebaseDatabase.instance.ref(
-        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/${widget.idGuia}/Movimientos',
-      ).push(); // crea id
+      if (_notificarEmpresa) {
+        // Geolocalización + dirección
+        final geo = await _obtenerGeoYDireccion();
+        final lat = geo['lat'] as double;
+        final lon = geo['lon'] as double;
+        final direccion = geo['direccion'] as String;
 
-      await movimientosRef.set({
-        'Fecha': fecha,
-        'FotoEvidencia': fotoUrl,
-        'Movimiento': 'DEV',
-        'NombreUsuario': (globalNombre?.trim().isNotEmpty ?? false) ? globalNombre : 'SinNombre',
-        'Nota': 'Evidencia de devolución de paquete a cliente',
-        'Recibio': _responsableCtrl.text.trim(),
-        'idUsuario': (globalUserId?.trim().isNotEmpty ?? false) ? globalUserId : 'SIN_UID',
-      });
+        // data con ÚNICO id
+        final data = _buildDataSingle();
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Devolución exitosamente')),
-      );
+        // Enviar al webhook
+        await _enviarWebhook(
+          fotoUrl: fotoUrl,
+          direccion: direccion,
+          lat: lat,
+          lon: lon,
+          data: data,
+        );
 
-      // Volver a la pantalla de Paquetes (vinimos con pushReplacement desde el escáner)
-      Navigator.pop(context);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Devolución notificada a la empresa.')),
+        );
+      } else {
+        // Flujo normal: guardar en Realtime Database
+        final movimientosRef = FirebaseDatabase.instance
+            .ref('projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/Historal/${widget.idGuia}/Movimientos')
+            .push();
+
+        await movimientosRef.set({
+          'Fecha': fecha,
+          'FotoEvidencia': fotoUrl,
+          'Movimiento': 'DEV',
+          'NombreUsuario': (globalNombre?.trim().isNotEmpty ?? false) ? globalNombre : 'SinNombre',
+          'Nota': 'Evidencia de devolución de paquete a cliente',
+          'Recibio': _responsableCtrl.text.trim(), // puede venir vacío si switch off
+          'Motivo': _motivoCtrl.text.trim(),       // puede venir vacío si switch off
+          'idUsuario': (globalUserId?.trim().isNotEmpty ?? false) ? globalUserId : 'SIN_UID',
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Devolución registrada exitosamente')),
+        );
+      }
+
+      if (mounted) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al guardar devolución: $e')),
+        SnackBar(content: Text('Error al procesar devolución: $e')),
       );
     } finally {
       if (mounted) setState(() => _subiendo = false);
     }
+  }
+
+  String? _validatorObligatorioSiNotificar(String? v, String nombreCampo) {
+    if (!_notificarEmpresa) return null; // no obligatorio si el switch está apagado
+    if (v == null || v.trim().isEmpty) return 'Ingrese $nombreCampo';
+    return null;
   }
 
   @override
@@ -118,7 +269,6 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
       appBar: AppBar(
         backgroundColor: amarillo,
         title: const Text('Devolución - Detalles'),
-        // Al presionar atrás, volvemos a Paquetes (porque la pantalla anterior fue reemplazada)
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
@@ -145,6 +295,7 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
+
                   const Text(
                     'Nombre Responsable de la empresa a devolver paquete:',
                     style: TextStyle(fontWeight: FontWeight.w600),
@@ -152,14 +303,14 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _responsableCtrl,
-                    decoration: const InputDecoration(
-                      hintText: 'Ej. Juan Pérez',
+                    decoration: InputDecoration(
+                      hintText: _notificarEmpresa ? 'Ej. Juan Pérez (requerido)' : 'Ej. Juan Pérez (opcional)',
                       filled: true,
                     ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Ingrese el nombre del responsable' : null,
+                    validator: (v) => _validatorObligatorioSiNotificar(v, 'el nombre del responsable'),
                   ),
                   const SizedBox(height: 16),
+
                   const Text(
                     'Motivo de Devolución',
                     style: TextStyle(fontWeight: FontWeight.w600),
@@ -167,15 +318,15 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _motivoCtrl,
-                    decoration: const InputDecoration(
-                      hintText: 'Describa el motivo',
+                    decoration: InputDecoration(
+                      hintText: _notificarEmpresa ? 'Describa el motivo (requerido)' : 'Describa el motivo (opcional)',
                       filled: true,
                     ),
                     maxLines: 3,
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Ingrese el motivo de devolución' : null,
+                    validator: (v) => _validatorObligatorioSiNotificar(v, 'el motivo de devolución'),
                   ),
                   const SizedBox(height: 16),
+
                   const Text(
                     'Evidencia (foto o imagen)',
                     style: TextStyle(fontWeight: FontWeight.w600),
@@ -209,7 +360,29 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
                         fit: BoxFit.cover,
                       ),
                     ),
-                  const SizedBox(height: 24),
+
+                  const SizedBox(height: 16),
+                  SwitchListTile.adaptive(
+                    value: _notificarEmpresa,
+                    onChanged: (v) => setState(() {
+                      _notificarEmpresa = v;
+                      // Revalida para actualizar mensajes de error si cambia el switch
+                      _formKey.currentState?.validate();
+                    }),
+                    title: const Text(
+                      'Notificar a Empresa',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      _notificarEmpresa
+                          ? 'Se tomará geolocalización, se obtendrá dirección y se enviará al webhook (incluye "data" con el único id). Campos de texto: REQUERIDOS.'
+                          : 'Se registrará la devolución únicamente en el sistema. Campos de texto: OPCIONALES.',
+                    ),
+                    activeColor: Colors.amber[700],
+                    contentPadding: EdgeInsets.zero,
+                  ),
+
+                  const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -219,9 +392,9 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text(
-                        'Finalizar Devolución',
-                        style: TextStyle(
+                      child: Text(
+                        _notificarEmpresa ? 'Finalizar y Notificar' : 'Finalizar Devolución',
+                        style: const TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.w700,
                         ),
@@ -232,6 +405,7 @@ class _DevolucionFormularioPageState extends State<DevolucionFormularioPage> {
               ),
             ),
           ),
+
           if (_subiendo)
             Container(
               color: Colors.black.withOpacity(0.35),
