@@ -76,6 +76,9 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   // ===== Estados de datos y UI =====
   bool _loadingData = true;
 
+  // NUEVO: flag para bloquear UI mientras se envía al webhook
+  bool _enviandoWebhook = false;
+
   // Índice de guías válidas para este centro
   final Map<String, PaqueteLocal> _indexPorCodigo = {}; // código normalizado → paquete
   List<PaqueteLocal> _seleccionados = [];
@@ -164,6 +167,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   }
 
   // ====== Cargar lista de paquetes de Firebase a local ======
+// ====== Cargar lista de paquetes de Firebase a local ======
   Future<void> _syncFirebaseToLocal() async {
     setState(() => _loadingData = true);
 
@@ -213,7 +217,8 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       if (raw != null) {
         final decoded = jsonDecode(raw);
         if (decoded is List) {
-          lista = decoded.map<PaqueteLocal>((m) => PaqueteLocal.fromMap(m)).toList();
+          lista =
+              decoded.map<PaqueteLocal>((m) => PaqueteLocal.fromMap(m)).toList();
         }
       }
     }
@@ -292,7 +297,8 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       }
 
       // Fallback v1 (claves)
-      final keysV1 = _readV1(_prefsSelV1ByEmbarque) ?? _readV1(_prefsSelV1Stable);
+      final keysV1 =
+          _readV1(_prefsSelV1ByEmbarque) ?? _readV1(_prefsSelV1Stable);
       if (keysV1 != null) {
         _codesProcesados
           ..clear()
@@ -463,7 +469,8 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
   }
 
   // ====== Manejo de lista (insertar/mover al tope) ======
-  Future<void> _insertarAlTope(PaqueteLocal p, {bool mostrarAvisoSiExistia = false}) async {
+  Future<void> _insertarAlTope(PaqueteLocal p,
+      {bool mostrarAvisoSiExistia = false}) async {
     setState(() {
       final key = _pkKey(p);
       final idx = _seleccionados.indexWhere((e) => _pkKey(e) == key);
@@ -506,8 +513,8 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
     if (p == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content:
-              Text('Este paquete no está asignado a este centro de recolección.'),
+          content: Text(
+              'Este paquete no está asignado a este centro de recolección.'),
         ),
       );
       return;
@@ -540,8 +547,12 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       _seleccionados.removeWhere((e) => _pkKey(e) == key);
 
       if (p.idGuiaPB.isNotEmpty) _codesProcesados.remove(_norm(p.idGuiaPB));
-      if (p.idGuiaProveedor.isNotEmpty) _codesProcesados.remove(_norm(p.idGuiaProveedor));
-      if (p.tnReference.isNotEmpty) _codesProcesados.remove(_norm(p.tnReference));
+      if (p.idGuiaProveedor.isNotEmpty) {
+        _codesProcesados.remove(_norm(p.idGuiaProveedor));
+      }
+      if (p.tnReference.isNotEmpty) {
+        _codesProcesados.remove(_norm(p.tnReference));
+      }
     });
     await _persistSeleccionados();
   }
@@ -561,6 +572,26 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       );
       return;
     }
+
+    // Evitar doble envío si el usuario toca varias veces
+    if (_enviandoWebhook) return;
+
+    setState(() {
+      _enviandoWebhook = true;
+    });
+
+    // Dialog de carga que BLOQUEA hasta que llegue la respuesta
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (_) => WillPopScope(
+        onWillPop: () async => false,
+        child: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      ),
+    );
 
     try {
       final fechaMs = DateTime.now().millisecondsSinceEpoch;
@@ -615,6 +646,7 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
 
         await Future.delayed(const Duration(milliseconds: 400));
         if (!mounted) return;
+
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => const RecolectadosCentrosPage(),
@@ -634,6 +666,14 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),
       );
+    } finally {
+      if (mounted) {
+        // Cerrar el loader
+        Navigator.of(context, rootNavigator: true).pop();
+        setState(() {
+          _enviandoWebhook = false;
+        });
+      }
     }
   }
 
@@ -819,87 +859,91 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                 SizedBox(
-  height: 40,
-  child: Row(
-    children: [
-      // Botón regresar (igual que antes)
-      Material(
-        color: Colors.white.withOpacity(0.18),
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          onTap: () => Navigator.pop(context),
-          borderRadius: BorderRadius.circular(10),
-          child: const SizedBox(
-            width: 36,
-            height: 36,
-            child: Icon(Icons.arrow_back_ios_new_rounded,
-                size: 18, color: Colors.white),
-          ),
-        ),
-      ),
+                  SizedBox(
+                    height: 40,
+                    child: Row(
+                      children: [
+                        // Botón regresar (igual que antes)
+                        Material(
+                          color: Colors.white.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            onTap: () => Navigator.pop(context),
+                            borderRadius: BorderRadius.circular(10),
+                            child: const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: Icon(Icons.arrow_back_ios_new_rounded,
+                                  size: 18, color: Colors.white),
+                            ),
+                          ),
+                        ),
 
-      const SizedBox(width: 8),
+                        const SizedBox(width: 8),
 
-      // Título alineado a la izquierda, con elipsis si hace falta
-      const Expanded(
-        child: Text(
-          'Recolección de paquetes',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-            fontSize: 18,
-          ),
-        ),
-      ),
+                        // Título alineado a la izquierda, con elipsis si hace falta
+                        const Expanded(
+                          child: Text(
+                            'Recolecciónde paquetes',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
 
-      const SizedBox(width: 8),
+                        const SizedBox(width: 8),
 
-      // Acciones de la derecha (tachito + contador)
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Material(
-            color: Colors.white.withOpacity(0.18),
-            borderRadius: BorderRadius.circular(10),
-            child: InkWell(
-              onTap: _seleccionados.isEmpty ? null : () => _limpiarSeleccionados(),
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox(
-                width: 36,
-                height: 36,
-                child: Icon(
-                  Icons.delete_outline,
-                  color: _seleccionados.isEmpty ? Colors.white38 : Colors.white,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.18),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    ],
-  ),
-),
+                        // Acciones de la derecha (tachito + contador)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Material(
+                              color: Colors.white.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(10),
+                              child: InkWell(
+                                onTap: _seleccionados.isEmpty
+                                    ? null
+                                    : () => _limpiarSeleccionados(),
+                                borderRadius: BorderRadius.circular(10),
+                                child: SizedBox(
+                                  width: 36,
+                                  height: 36,
+                                  child: Icon(
+                                    Icons.delete_outline,
+                                    color: _seleccionados.isEmpty
+                                        ? Colors.white38
+                                        : Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$count',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
 
                   const SizedBox(height: 12),
 
@@ -938,7 +982,8 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
                   const SizedBox(height: 2),
                   Text(
                     widget.direccionCentro,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style:
+                        const TextStyle(color: Colors.white70, fontSize: 12),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1088,7 +1133,8 @@ class _RecolectarRecoleccionPageState extends State<RecolectarRecoleccionPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.photo_camera_front, color: Colors.white70, size: 40),
+            const Icon(Icons.photo_camera_front,
+                color: Colors.white70, size: 40),
             const SizedBox(height: 8),
             const Text(
               'Se requiere permiso de cámara',
@@ -1185,8 +1231,8 @@ class _BottomBar extends StatelessWidget {
                     ),
                     child: const Text(
                       'Finalizar',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w700),
                     ),
                   ),
                 ),

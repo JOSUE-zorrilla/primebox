@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:typed_data'; // NUEVO: bytes para preview y subida
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -14,10 +15,24 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
-import 'login_page.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+
+import 'login_page.dart';
 import 'multi_guias_page.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart'; // NUEVO
+
+/// Canal nativo para pedir a Android que escanee el archivo (aparezca en galería)
+const _mediaScanChannel = MethodChannel('primebox/media_scan');
+
+Future<void> _scanFile(String filePath) async {
+  if (!Platform.isAndroid) return;
+  try {
+    await _mediaScanChannel.invokeMethod('scanFile', {'path': filePath});
+  } catch (_) {
+    // si falla, no rompemos nada
+  }
+}
 
 class PaqueteDetallePage extends StatefulWidget {
   final String id;
@@ -38,14 +53,11 @@ class PaqueteDetallePage extends StatefulWidget {
 }
 
 class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
-  // Marca
   static const Color brand = Color(0xFF2F63D3);
 
-  // Controllers
   final TextEditingController _quienRecibeController = TextEditingController();
   final TextEditingController _notaController = TextEditingController();
 
-  // Estado
   String _opcionSeleccionada = 'Titular';
   Position? _posicionActual;
   String? _idEmpresa;
@@ -53,18 +65,13 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   String? _urlImagen1;
   String? _urlImagen2;
   String? _urlImagen3;
-  String? _urlImagen4; // NUEVO: INE
+  String? _urlImagen4; // INE
 
-  // Ahora 4 posiciones (0..2: evidencias normales, 3: INE opcional)
+  // 0..2 evidencias normales, 3 INE opcional
   final List<File?> _imagenes = [null, null, null, null];
-
-  // NUEVO: previews comprimidos (lo que realmente subimos) – ahora 4
   final List<Uint8List?> _previewsComprimidos = [null, null, null, null];
 
-  // NUEVO: switch para habilitar INE
   bool _ineHabilitado = false;
-
-  // NUEVO: estado de envío al webhook
   bool _enviando = false;
 
   List<String> _guiasMulti = [];
@@ -78,12 +85,15 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     'Otro',
   ];
 
-  // 🔒 Actualizado: ahora cuenta también la Evidencia4 (INE) si está presente
   bool get _tieneAlMenosUnaImagen =>
       _urlImagen1 != null ||
       _urlImagen2 != null ||
       _urlImagen3 != null ||
       _urlImagen4 != null;
+
+  /// Nombre de quien recibe obligatorio
+  bool get _nombreRecibeValido =>
+      _quienRecibeController.text.trim().isNotEmpty;
 
   @override
   void initState() {
@@ -136,14 +146,13 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   void _llamar() async {
     final tel = _normalizePhone(widget.telefono, forWhatsApp: false);
 
-    // Validación simple: al menos 7 dígitos
     final digits = tel.replaceAll(RegExp(r'\D'), '');
     if (digits.length < 7) {
       _snack('Número de teléfono inválido');
       return;
     }
 
-    final uri = Uri(scheme: 'tel', path: tel); // soporta '+'
+    final uri = Uri(scheme: 'tel', path: tel);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
@@ -154,10 +163,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   Future<void> _enviarWhatsApp() async {
     final String mensaje = 'Hola...';
 
-    // Quita separadores y el '+'; wa.me exige SOLO dígitos en formato internacional
     String tel = _normalizePhone(widget.telefono, forWhatsApp: true);
 
-    // Valida que tenga de 7 a 15 dígitos
     if (!RegExp(r'^\d{7,15}$').hasMatch(tel)) {
       _snack('Número inválido. Debe incluir el código de país y solo dígitos. Recibido: "$tel"');
       return;
@@ -172,16 +179,13 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   }
 
   // ===== COMPRESIÓN =====
-
-  /// Comprime una imagen a JPEG con lado largo máx. 1600px y calidad 75.
-  /// Devuelve bytes listos para subir con putData.
   Future<Uint8List> _compressImage(File file) async {
     final originalBytes = await file.readAsBytes();
     final result = await FlutterImageCompress.compressWithList(
       originalBytes,
       minWidth: 1600,
       minHeight: 1600,
-      quality: 75, // baja más si quieres menor peso (60–70)
+      quality: 75,
       rotate: 0,
       keepExif: true,
       format: CompressFormat.jpeg,
@@ -189,10 +193,67 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     return Uint8List.fromList(result);
   }
 
+  /// Fallback: guarda en carpeta interna `primebox`
+  Future<File> _saveToLocalPrimebox(Uint8List bytes) async {
+    Directory baseDir;
+    if (Platform.isAndroid) {
+      final dir = await getExternalStorageDirectory();
+      baseDir = dir ?? await getApplicationDocumentsDirectory();
+    } else {
+      baseDir = await getApplicationDocumentsDirectory();
+    }
+
+    final primeboxDir = Directory(path.join(baseDir.path, 'primebox'));
+    if (!await primeboxDir.exists()) {
+      await primeboxDir.create(recursive: true);
+    }
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final filePath = path.join(primeboxDir.path, '$timestamp.jpg');
+
+    final file = File(filePath);
+    await file.writeAsBytes(bytes, flush: true);
+
+    return file;
+  }
+
+  /// Guarda en /storage/emulated/0/Pictures/primebox (galería) en Android.
+  /// Si falla o no es Android, usa _saveToLocalPrimebox.
+  Future<File> _saveToGalleryPrimebox(Uint8List bytes) async {
+    if (!Platform.isAndroid) {
+      return _saveToLocalPrimebox(bytes);
+    }
+
+    // Pedir permiso de almacenamiento (para Android < 13)
+    final status = await Permission.storage.request();
+    if (!status.isGranted) {
+      // sin permiso, guardamos al menos en carpeta interna
+      return _saveToLocalPrimebox(bytes);
+    }
+
+    // Ruta típica de Pictures en Android
+    final Directory dirPictures =
+        Directory('/storage/emulated/0/Pictures/primebox');
+
+    if (!await dirPictures.exists()) {
+      await dirPictures.create(recursive: true);
+    }
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final filePath = path.join(dirPictures.path, '$timestamp.jpg');
+
+    final file = File(filePath);
+    await file.writeAsBytes(bytes, flush: true);
+
+    // 👉 Avisar al sistema para que aparezca en galería
+    await _scanFile(filePath);
+
+    return file;
+  }
+
   Future<void> _seleccionarImagen(int index) async {
     final picker = ImagePicker();
 
-    // Selector de origen
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -212,15 +273,17 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
               ),
             ),
             const SizedBox(height: 10),
-            const Text('Captura de evidencia',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            const Text(
+              'Captura de evidencia',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
             const SizedBox(height: 6),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Seleccionar de galería'),
               onTap: () async {
                 Navigator.pop(context);
-                final status = await Permission.photos.request(); // iOS
+                final status = await Permission.photos.request(); // iOS / nuevos
                 if (status.isGranted) {
                   final picked = await picker.pickImage(
                     source: ImageSource.gallery,
@@ -264,11 +327,10 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     );
   }
 
-  // ---- Subida comprimida con UN solo SnackBar de 2s ----
+  // ---- Subida comprimida + guardado en galería primebox ----
   Future<void> _subirImagenAFirebase(File image, int index) async {
     final messenger = ScaffoldMessenger.of(context);
 
-    // Un único mensaje de 2s apenas inicia la acción
     messenger.clearSnackBars();
     messenger.showSnackBar(
       const SnackBar(
@@ -282,12 +344,20 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       // 1) Comprimir a JPEG
       final Uint8List compressed = await _compressImage(image);
 
-      // 2) Subir a Firebase Storage con putData (bytes) y metadata
-      final fileName = path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
+      // 2) Guardar en GALERÍA en carpeta "primebox"
+      final File localSavedFile = await _saveToGalleryPrimebox(compressed);
+
+      // 3) Subir a Firebase Storage con putData (bytes) y metadata
+      final originalName =
+          path.basename(image.path).replaceAll(RegExp(r'\s+'), '_');
+
+      final int ts = DateTime.now().millisecondsSinceEpoch;
+      final storageFileName = '${ts}_$originalName.jpg';
+
       final ref = FirebaseStorage.instance
           .ref()
           .child('imagenesaplicacion')
-          .child('${DateTime.now().millisecondsSinceEpoch}_$fileName.jpg');
+          .child(storageFileName);
 
       await ref.putData(
         compressed,
@@ -296,12 +366,10 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
       final url = await ref.getDownloadURL();
 
-      // 3) Actualizar estado: file local + preview comprimido + URL
       if (!mounted) return;
       setState(() {
-        // Asegura que los arreglos tengan índice suficiente (0..3)
         if (index >= 0 && index < _imagenes.length) {
-          _imagenes[index] = image;
+          _imagenes[index] = localSavedFile; // archivo en Pictures/primebox
         }
         if (index >= 0 && index < _previewsComprimidos.length) {
           _previewsComprimidos[index] = compressed;
@@ -318,8 +386,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         }
       });
     } catch (e) {
-      // Silencioso como pediste (solo un snack al inicio).
-      // debugPrint('Error al subir imagen: $e');
+      // silencioso, ya mostramos "Cargando imagen..."
     }
   }
 
@@ -327,22 +394,15 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  /// Normaliza números de teléfono.
-  /// - Quita espacios, guiones, paréntesis, puntos, etc.
-  /// - Conserva un '+' solo si está al inicio.
-  /// - Para WhatsApp devuelve SIN '+', como requiere wa.me.
   String _normalizePhone(String input, {bool forWhatsApp = false}) {
     if (input.isEmpty) return input;
 
-    // Quitar separadores comunes
     var s = input.replaceAll(RegExp(r'[\s\-\(\)\.\_\/]'), '');
 
-    // Mantener '+' solo al inicio (si existía)
     final hadPlus = s.startsWith('+');
     s = s.replaceAll('+', '');
     if (hadPlus) s = '+$s';
 
-    // Para wa.me el número debe ir sin '+'
     if (forWhatsApp && s.startsWith('+')) {
       s = s.substring(1);
     }
@@ -355,7 +415,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         hintText: hint,
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: Color(0xFFE6E6E6)),
@@ -411,26 +472,37 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
   }
 
   Widget _photoSlot(int index, {String? label}) {
-    // label opcional para diferenciar el INE visualmente
     final child = Container(
       width: 90,
       height: 90,
       decoration: BoxDecoration(
         color: const Color(0xFFF4F6F9),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE6E6E6)),
+        border: Border.all(
+          color: const Color(0xFFE6E6E6),
+        ),
       ),
       child: _previewsComprimidos[index] != null
           ? ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.memory(_previewsComprimidos[index]!, fit: BoxFit.cover),
+              child: Image.memory(
+                _previewsComprimidos[index]!,
+                fit: BoxFit.cover,
+              ),
             )
           : (_imagenes[index] != null
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.file(_imagenes[index]!, fit: BoxFit.cover),
+                  child: Image.file(
+                    _imagenes[index]!,
+                    fit: BoxFit.cover,
+                  ),
                 )
-              : const Icon(Icons.add_a_photo_outlined, size: 26, color: Colors.black45)),
+              : const Icon(
+                  Icons.add_a_photo_outlined,
+                  size: 26,
+                  color: Colors.black45,
+                )),
     );
 
     return Column(
@@ -442,13 +514,15 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
         ),
         if (label != null) ...[
           const SizedBox(height: 6),
-          Text(label, style: const TextStyle(fontSize: 11, color: Colors.black54)),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: Colors.black54),
+          ),
         ]
       ],
     );
   }
 
-  // ---------- Painter para borde punteado ----------
   Widget _dashedBox({required Widget child}) {
     return CustomPaint(
       painter: _DashedRectPainter(
@@ -464,19 +538,20 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
       ),
     );
   }
+
   // -------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // FONDO BLANCO
+      backgroundColor: Colors.white,
       appBar: AppBar(
         systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.white, // fondo blanco en status bar
-          statusBarIconBrightness: Brightness.dark, // íconos oscuros (Android)
-          statusBarBrightness: Brightness.light, // iOS: texto oscuro
+          statusBarColor: Colors.white,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
         ),
-        backgroundColor: Colors.white, // APPBAR BLANCO
+        backgroundColor: Colors.white,
         foregroundColor: brand,
         elevation: 0,
         centerTitle: true,
@@ -498,7 +573,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 borderRadius: BorderRadius.circular(8),
               ),
               alignment: Alignment.center,
-              child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 16),
+              child: const Icon(
+                Icons.arrow_back_ios_new,
+                color: Colors.white,
+                size: 16,
+              ),
             ),
           ),
         ),
@@ -511,7 +590,7 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                 context,
                 MaterialPageRoute(
                   builder: (_) => MultiGuiasPage(
-                    initialGuias: {idBase, ..._guiasMulti}.toList(), // 👈 ya marcadas
+                    initialGuias: {idBase, ..._guiasMulti}.toList(),
                   ),
                 ),
               );
@@ -519,15 +598,18 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
               if (resultado != null && resultado is List<String>) {
                 final idBase2 = Uri.decodeFull(widget.id).trim();
                 setState(() {
-                  _guiasMulti = {idBase2, ...resultado}.toList(); // aseguras id base y evitas duplicados
+                  _guiasMulti = {idBase2, ...resultado}.toList();
                 });
               }
             },
-            child: Text('MultiGuía', style: TextStyle(color: brand, fontWeight: FontWeight.w600)),
+            child: Text(
+              'MultiGuía',
+              style: TextStyle(color: brand, fontWeight: FontWeight.w600),
+            ),
           )
         ],
       ),
-      body: SafeArea( // 👉 asegura que el botón no quede debajo de las teclas de Android
+      body: SafeArea(
         top: false,
         bottom: true,
         child: Center(
@@ -536,7 +618,6 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
             child: ListView(
               padding: const EdgeInsets.all(14),
               children: [
-                // --- SECCIÓN PRINCIPAL (sin card, todo blanco) ---
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -548,15 +629,29 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Teléfono:',
-                                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+                              const Text(
+                                'Teléfono:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                ),
+                              ),
                               const SizedBox(height: 2),
-                              Text(widget.telefono,
-                                  style: const TextStyle(fontWeight: FontWeight.w600)),
+                              Text(
+                                widget.telefono,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ],
                           ),
                         ),
-                        _chipButton(icon: Icons.phone, label: 'Llamar', onTap: _llamar, color: brand),
+                        _chipButton(
+                          icon: Icons.phone,
+                          label: 'Llamar',
+                          onTap: _llamar,
+                          color: brand,
+                        ),
                         const SizedBox(width: 8),
                         _chipButton(
                           icon: FontAwesomeIcons.whatsapp,
@@ -569,24 +664,36 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
                     const SizedBox(height: 14),
 
-                    // Guía / Titular
-                    const Text('No. Guía:',
-                        style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const Text(
+                      'No. Guía:',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                     const SizedBox(height: 2),
-                    Text(widget.tnReference,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      widget.tnReference,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     const SizedBox(height: 10),
 
-                    const Text('Titular:',
-                        style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const Text(
+                      'Titular:',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                     const SizedBox(height: 2),
-                    Text(widget.destinatario,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      widget.destinatario,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     const SizedBox(height: 6),
 
                     if (_idEmpresa != null)
-                      Text('Empresa: ${_idEmpresa!}',
-                          style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                      Text(
+                        'Empresa: ${_idEmpresa!}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black54,
+                        ),
+                      ),
 
                     const SizedBox(height: 16),
 
@@ -595,27 +702,35 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                       value: _opcionSeleccionada,
                       decoration: _input('Parentesco'),
                       items: _opciones
-                          .map((opcion) =>
-                              DropdownMenuItem(value: opcion, child: Text(opcion)))
+                          .map(
+                            (opcion) => DropdownMenuItem(
+                              value: opcion,
+                              child: Text(opcion),
+                            ),
+                          )
                           .toList(),
-                      onChanged: (v) => setState(() => _opcionSeleccionada = v!),
+                      onChanged: (v) =>
+                          setState(() => _opcionSeleccionada = v!),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: _quienRecibeController,
                       decoration: _input('Nombre de quien recibe'),
+                      onChanged: (_) => setState(() {}), // para habilitar botón
                     ),
 
                     const SizedBox(height: 16),
                     _sectionTitle('Captura de Evidencia'),
 
-                    // Caja punteada con 3 cuadritos (sin botones)
                     _dashedBox(
                       child: Column(
                         children: [
                           const SizedBox(height: 6),
-                          const Icon(Icons.cloud_upload_outlined,
-                              size: 42, color: Colors.black87),
+                          const Icon(
+                            Icons.cloud_upload_outlined,
+                            size: 42,
+                            color: Colors.black87,
+                          ),
                           const SizedBox(height: 6),
                           const Text(
                             'Selecciona o arrastra tus imágenes o video',
@@ -629,41 +744,44 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                           const SizedBox(height: 2),
                           const Text(
                             '(Png y Jpg máx 1gb)',
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.black54),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.black54,
+                            ),
                           ),
                           const SizedBox(height: 12),
 
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: List.generate(3, (i) => _photoSlot(i)),
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children:
+                                List.generate(3, (i) => _photoSlot(i)),
                           ),
 
-                          // 🔒 Aviso visual cuando NO hay imágenes aún
                           if (!_tieneAlMenosUnaImagen) ...[
                             const SizedBox(height: 12),
                             const Text(
                               'Debes adjuntar al menos 1 imagen para poder guardar.',
                               style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.redAccent,
-                                  fontWeight: FontWeight.w600),
+                                fontSize: 12,
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.w600),
                               textAlign: TextAlign.center,
                             ),
                           ],
 
                           const SizedBox(height: 10),
-                          // NUEVO: Switch para INE
                           SwitchListTile.adaptive(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('Adjuntar INE (opcional)',
-                                style: TextStyle(fontWeight: FontWeight.w600)),
+                            title: const Text(
+                              'Adjuntar INE (opcional)',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
                             value: _ineHabilitado,
                             onChanged: (v) =>
                                 setState(() => _ineHabilitado = v),
                           ),
 
-                          // Si el switch está activo, mostramos un cuarto slot para INE
                           if (_ineHabilitado) ...[
                             const SizedBox(height: 8),
                             Align(
@@ -690,16 +808,21 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                         decoration: BoxDecoration(
                           color: const Color(0xFFF9FAFB),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE6E6E6)),
+                          border: Border.all(
+                            color: const Color(0xFFE6E6E6),
+                          ),
                         ),
                         child: Column(
                           children: _guiasMulti
-                              .map((id) => ListTile(
-                                    dense: true,
-                                    leading:
-                                        const Icon(Icons.qr_code_2_outlined),
-                                    title: Text(id),
-                                  ))
+                              .map(
+                                (id) => ListTile(
+                                  dense: true,
+                                  leading: const Icon(
+                                    Icons.qr_code_2_outlined,
+                                  ),
+                                  title: Text(id),
+                                ),
+                              )
                               .toList(),
                         ),
                       ),
@@ -709,17 +832,23 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
 
                 const SizedBox(height: 14),
 
-                // ---- BOTÓN PRIMARIO (Guardar) ----
                 SizedBox(
                   height: 48,
                   child: ElevatedButton(
-                    // 🔒 Deshabilitar si no hay al menos 1 imagen o si está enviando
-                    onPressed: (_tieneAlMenosUnaImagen && !_enviando)
+                    onPressed: (_tieneAlMenosUnaImagen &&
+                            !_enviando &&
+                            _nombreRecibeValido)
                         ? () async {
-                            // 🔒 Doble chequeo por seguridad
+                            // doble chequeo por si acaso
+                            if (!_nombreRecibeValido) {
+                              _snack('Debes ingresar el nombre de quien recibe.');
+                              return;
+                            }
+
                             if (!_tieneAlMenosUnaImagen) {
                               _snack(
-                                  'Debes adjuntar al menos 1 imagen para poder guardar.');
+                                'Debes adjuntar al menos 1 imagen para poder guardar.',
+                              );
                               return;
                             }
 
@@ -737,10 +866,11 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                             final parentesco = _opcionSeleccionada;
                             final nota = _notaController.text.trim();
 
-                            final alMenosUnaFoto = _urlImagen1 != null ||
-                                _urlImagen2 != null ||
-                                _urlImagen3 != null ||
-                                _urlImagen4 != null;
+                            final alMenosUnaFoto =
+                                _urlImagen1 != null ||
+                                    _urlImagen2 != null ||
+                                    _urlImagen3 != null ||
+                                    _urlImagen4 != null;
 
                             final estadoFoto = alMenosUnaFoto
                                 ? "el usuario dejó tomarse la foto"
@@ -754,14 +884,13 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                             final textoNota =
                                 "Recibe: $parentesco con nombre $recibe, $estadoFoto, $estadoIne${nota.isNotEmpty ? ', $nota' : ''}";
 
-                            // Transforma la lista de guías en un objeto { guia: { idGuia: guia }, ... }
                             final String idRegistro =
                                 Uri.decodeFull(widget.id).trim();
-                            final List<String> fuentes = _guiasMulti.isNotEmpty
-                                ? _guiasMulti
-                                : [idRegistro];
+                            final List<String> fuentes =
+                                _guiasMulti.isNotEmpty
+                                    ? _guiasMulti
+                                    : [idRegistro];
 
-                            // Opcional: deduplicar por si se repite algo
                             final Set<String> unicas =
                                 fuentes.map((e) => e.trim()).toSet();
 
@@ -774,16 +903,20 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                               "Evidencia1": _urlImagen1 ?? "",
                               "Evidencia2": _urlImagen2 ?? "",
                               "Evidencia3": _urlImagen3 ?? "",
-                              "Evidencia4": _urlImagen4 ?? "", // NUEVO: INE
+                              "Evidencia4": _urlImagen4 ?? "",
                               "Latitude":
-                                  _posicionActual?.latitude.toString() ?? "",
+                                  _posicionActual?.latitude
+                                          .toString() ??
+                                      "",
                               "Longitude":
-                                  _posicionActual?.longitude.toString() ?? "",
+                                  _posicionActual?.longitude
+                                          .toString() ??
+                                      "",
                               "NombreDriver":
                                   globalNombre ?? "SinNombre",
                               "Nota": textoNota,
-                              "TimeStamp":
-                                  DateTime.now().millisecondsSinceEpoch,
+                              "TimeStamp": DateTime.now()
+                                  .millisecondsSinceEpoch,
                               "Parentesco": parentesco,
                               "NombreRecibe": recibe,
                               "YYYYMMDD": yyyyMMdd,
@@ -808,13 +941,12 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                               if (!mounted) return;
 
                               if (response.statusCode == 200) {
-                                _snack(
-                                    'Información enviada exitosamente');
-                                // 👉 Solo volvemos atrás cuando todo termina bien
+                                _snack('Información enviada exitosamente');
                                 Navigator.pop(context);
                               } else {
                                 _snack(
-                                    'Error al enviar: ${response.body}');
+                                  'Error al enviar: ${response.body}',
+                                );
                               }
                             } catch (e) {
                               if (!mounted) return;
@@ -825,16 +957,18 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                               }
                             }
                           }
-                        : null, // 👉 desactivado si no hay imagen o si está enviando
+                        : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: brand,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       textStyle: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 16),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
                       elevation: 0,
-                      // 🔒 Visual: reduce opacidad cuando esté deshabilitado
                       disabledBackgroundColor: brand.withOpacity(0.35),
                       disabledForegroundColor: Colors.white70,
                     ),
@@ -849,7 +983,8 @@ class _PaqueteDetallePageState extends State<PaqueteDetallePage> {
                                   strokeWidth: 2,
                                   valueColor:
                                       AlwaysStoppedAnimation<Color>(
-                                          Colors.white),
+                                    Colors.white,
+                                  ),
                                 ),
                               ),
                               SizedBox(width: 10),
@@ -915,11 +1050,11 @@ class _DashedRectPainter extends CustomPainter {
       }
     }
 
-    // Lados rectos dejando radio en esquinas
-    drawDashedLine(Offset(r, 0), Offset(w - r, 0)); // top
-    drawDashedLine(Offset(w, r), Offset(w, h - r)); // right
-    drawDashedLine(Offset(w - r, h), Offset(r, h)); // bottom
-    drawDashedLine(Offset(0, h - r), Offset(0, r)); // left
+    // Lados rectos
+    drawDashedLine(Offset(r, 0), Offset(w - r, 0));
+    drawDashedLine(Offset(w, r), Offset(w, h - r));
+    drawDashedLine(Offset(w - r, h), Offset(r, h));
+    drawDashedLine(Offset(0, h - r), Offset(0, r));
 
     void drawDashedArc(Rect rect, double startAngle, double sweep) {
       final path = Path()..addArc(rect, startAngle, sweep);
@@ -936,13 +1071,25 @@ class _DashedRectPainter extends CustomPainter {
     }
 
     drawDashedArc(
-        Rect.fromCircle(center: Offset(r, r), radius: r), math.pi, math.pi / 2); // top-left
-    drawDashedArc(Rect.fromCircle(center: Offset(w - r, r), radius: r),
-        -math.pi / 2, math.pi / 2); // top-right
-    drawDashedArc(Rect.fromCircle(center: Offset(w - r, h - r), radius: r), 0,
-        math.pi / 2); // bottom-right
-    drawDashedArc(Rect.fromCircle(center: Offset(r, h - r), radius: r),
-        math.pi / 2, math.pi / 2); // bottom-left
+      Rect.fromCircle(center: Offset(r, r), radius: r),
+      math.pi,
+      math.pi / 2,
+    );
+    drawDashedArc(
+      Rect.fromCircle(center: Offset(w - r, r), radius: r),
+      -math.pi / 2,
+      math.pi / 2,
+    );
+    drawDashedArc(
+      Rect.fromCircle(center: Offset(w - r, h - r), radius: r),
+      0,
+      math.pi / 2,
+    );
+    drawDashedArc(
+      Rect.fromCircle(center: Offset(r, h - r), radius: r),
+      math.pi / 2,
+      math.pi / 2,
+    );
   }
 
   @override
