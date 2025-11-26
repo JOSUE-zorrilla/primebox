@@ -23,6 +23,9 @@ import 'devoluciones_scan_page.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'delegar_paquete_page.dart';
 
+// NUEVO: pantalla de historial de paquetes
+import 'historial_entregas_page.dart';
+
 // String? globalNombre;
 // String? globalUserId;
 
@@ -144,7 +147,7 @@ class _PaquetesPageState extends State<PaquetesPage> {
             const Text(
               'Muestra este QR para que otro conductor te delegue un paquete.',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.black54),
+              style: TextStyle(fontSize: 12, color: Colors.black54),
             ),
           ],
         ),
@@ -365,6 +368,8 @@ class _PaquetesPageState extends State<PaquetesPage> {
               'TipoEnvio': paquete['TipoEnvio'] ?? '',
               'Telefono': paquete['Telefono'] ?? '',
               'TnReference': paquete['TnReference'] ?? '',
+              // NUEVO: leer Zona
+              'Zona': paquete['Zona'] ?? '',
             });
           }
         });
@@ -590,6 +595,18 @@ class _PaquetesPageState extends State<PaquetesPage> {
                       );
                     },
                   ),
+                  // NUEVO: historial de paquetes
+                  item(
+                    icon: Icons.history,
+                    text: 'Historial de paquetes',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const HistorialEntregasPage()),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -726,22 +743,21 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                 ),
                               ),
                               const SizedBox(width: 10),
-                             _SquareIconButton(
-                              icon: Icons.qr_code, // este muestra tu propio QR
-                              onTap: _mostrarMiQR,
-                            ),
-                            const SizedBox(width: 10),
-                            _SquareIconButton(
-                              icon: Icons.qr_code_scanner, // este abre el escáner
-                              onTap: () async {
-                                if (!_requerirConexion()) return;
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
-                                );
-                              },
-                            ),
-
+                              _SquareIconButton(
+                                icon: Icons.qr_code, // este muestra tu propio QR
+                                onTap: _mostrarMiQR,
+                              ),
+                              const SizedBox(width: 10),
+                              _SquareIconButton(
+                                icon: Icons.qr_code_scanner, // este abre el escáner
+                                onTap: () async {
+                                  if (!_requerirConexion()) return;
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const EscanearPaquetePage()),
+                                  );
+                                },
+                              ),
                             ],
                           ),
                         ],
@@ -809,7 +825,9 @@ class _PaquetesPageState extends State<PaquetesPage> {
                                       id: paquete['id'],
                                       direccion:
                                           paquete['DireccionEntrega'],
-                                      destinatario: paquete['Destinatario'],
+                                      destinatario:
+                                          paquete['Destinatario'],
+                                      zona: (paquete['Zona'] ?? '').toString(), // NUEVO
                                       intentos: paquete['Intentos'],
                                       tipoEnvio: tipoEnvio,
                                       esEspecial: esEspecial,
@@ -1008,6 +1026,7 @@ class _PaqueteCard extends StatelessWidget {
   final String id;
   final String direccion;
   final String destinatario;
+  final String zona; // NUEVO
   final int intentos;
   final String tipoEnvio;
   final bool esEspecial;
@@ -1019,6 +1038,7 @@ class _PaqueteCard extends StatelessWidget {
     required this.id,
     required this.direccion,
     required this.destinatario,
+    required this.zona, // NUEVO
     required this.intentos,
     required this.tipoEnvio,
     required this.esEspecial,
@@ -1075,6 +1095,14 @@ class _PaqueteCard extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w700)),
           ])),
           Text(destinatario),
+          const SizedBox(height: 2),
+          // NUEVO: mostrar Zona
+          Text.rich(TextSpan(children: const [
+            TextSpan(
+                text: 'Zona',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ])),
+          Text(zona.isEmpty ? '-' : zona),
           const SizedBox(height: 4),
           Text('Intentos: $intentos'),
           const SizedBox(height: 12),
