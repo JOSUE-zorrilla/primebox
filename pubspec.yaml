@@ -2,7 +2,7 @@ name: escanear_qr
 description: "A new Flutter project."
 publish_to: 'none' 
 
-version: 500.0.0+1
+version: 530.0.0+1
 
 environment:
   sdk: ^3.8.1
