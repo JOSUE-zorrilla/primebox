@@ -19,24 +19,26 @@ class _HistorialEntregasPageState extends State<HistorialEntregasPage> {
   String? _error;
   final List<Map<String, dynamic>> _registros = [];
 
-  // fecha seleccionada (por defecto: hoy)
-  late DateTime _selectedDate;
+  /// Rango de fechas (NO puede ser mayor a hoy)
+  late DateTime _fromDate;
+  late DateTime _toDate;
 
-  // para armar la clave de la fecha en la DB: 2025-11-24
-  String get _fechaClaveDb =>
-      DateFormat('yyyy-MM-dd').format(_selectedDate);
+  final DateFormat _fmtDb = DateFormat('yyyy-MM-dd');
+  final DateFormat _fmtUi = DateFormat('dd/MM/yyyy');
 
-  // para mostrar en la UI: 24/11/2025
-  String get _fechaTextoUi =>
-      DateFormat('dd/MM/yyyy').format(_selectedDate);
+  String get _fromText => _fmtUi.format(_fromDate);
+  String get _toText => _fmtUi.format(_toDate);
 
   @override
   void initState() {
     super.initState();
-    _selectedDate = DateTime.now();
+    final now = DateTime.now();
+    _fromDate = DateTime(now.year, now.month, now.day); // hoy
+    _toDate   = DateTime(now.year, now.month, now.day); // hoy
     _cargarRegistros();
   }
 
+  /// LEE TODAS LAS FECHAS ENTRE [_fromDate] y [_toDate] (ambas incluidas)
   Future<void> _cargarRegistros() async {
     setState(() {
       _loading = true;
@@ -62,51 +64,62 @@ class _HistorialEntregasPageState extends State<HistorialEntregasPage> {
         return;
       }
 
-      // Ruta: EntregasRepartidor/{driverId}/Meses/YYYY-MM-DD/Paquetes
-      final ref = FirebaseDatabase.instance.ref(
-        'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/EntregasRepartidor/$driverId/Meses/$_fechaClaveDb/Paquetes',
-      );
+      final List<Map<String, dynamic>> temp = [];
 
-      final snap = await ref.get();
-      if (!snap.exists || snap.value == null) {
-        setState(() {
-          _loading = false;
-        });
-        return;
+      // Iterar por cada día del rango
+      DateTime current = _fromDate;
+      final DateTime today = DateTime.now();
+
+      while (!current.isAfter(_toDate)) {
+        // Seguridad extra: nunca leer más allá de hoy
+        final safeCurrent = current.isAfter(today)
+            ? DateTime(today.year, today.month, today.day)
+            : current;
+
+        final fechaClaveDb = _fmtDb.format(safeCurrent);
+
+        // Ruta: EntregasRepartidor/{driverId}/Meses/YYYY-MM-DD/Paquetes
+        final ref = FirebaseDatabase.instance.ref(
+          'projects/proj_bt5YXxta3UeFNhYLsJMtiL/data/EntregasRepartidor/$driverId/Meses/$fechaClaveDb/Paquetes',
+        );
+
+        final snap = await ref.get();
+        if (snap.exists && snap.value != null && snap.value is Map) {
+          final value = snap.value as Map;
+
+          value.forEach((key, dynamic v) {
+            if (v is Map) {
+              final fecha = v['Fecha']?.toString() ?? '';
+              final idGuia = v['idGuia']?.toString() ?? key.toString();
+              final idMovimiento = v['idMovimiento']?.toString() ?? '';
+
+              temp.add({
+                'idMovimiento': idMovimiento,
+                'idGuia': idGuia,
+                'Fecha': fecha,
+                'FechaClave': fechaClaveDb, // por si quieres mostrar luego
+              });
+            }
+          });
+        }
+
+        // siguiente día
+        current = current.add(const Duration(days: 1));
       }
 
-      final value = snap.value;
-      if (value is Map) {
-        final List<Map<String, dynamic>> temp = [];
+      // Ordenar por fecha (texto) y luego por guía
+      temp.sort((a, b) {
+        final f1 = (a['Fecha'] as String?) ?? '';
+        final f2 = (b['Fecha'] as String?) ?? '';
+        final cmp = f1.compareTo(f2);
+        if (cmp != 0) return cmp;
+        return (a['idGuia'] as String).compareTo(b['idGuia'] as String);
+      });
 
-        value.forEach((key, dynamic v) {
-          // key = idGuia (por ejemplo PB1762292007638OX)
-          if (v is Map) {
-            final fecha = v['Fecha']?.toString() ?? '';
-            final idGuia = v['idGuia']?.toString() ?? key.toString();
-            final idMovimiento = v['idMovimiento']?.toString() ?? '';
-
-            temp.add({
-              'idMovimiento': idMovimiento,
-              'idGuia': idGuia,
-              'Fecha': fecha,
-            });
-          }
-        });
-
-        // Ordenar por fecha ascendente (como texto)
-        temp.sort((a, b) =>
-            (a['Fecha'] as String).compareTo(b['Fecha'] as String));
-
-        setState(() {
-          _registros.addAll(temp);
-          _loading = false;
-        });
-      } else {
-        setState(() {
-          _loading = false;
-        });
-      }
+      setState(() {
+        _registros.addAll(temp);
+        _loading = false;
+      });
     } catch (e) {
       setState(() {
         _error = 'Error al cargar historial: $e';
@@ -115,25 +128,43 @@ class _HistorialEntregasPageState extends State<HistorialEntregasPage> {
     }
   }
 
-  // selector de fecha
-  Future<void> _pickDate() async {
+  /// Selector genérico de fecha (desde / hasta)
+  Future<void> _pickDate({required bool isFrom}) async {
     final DateTime now = DateTime.now();
     final DateTime firstDate = DateTime(now.year - 1, 1, 1); // 1 año atrás
 
+    final initial = isFrom ? _fromDate : _toDate;
+
     final newDate = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
+      initialDate: initial,
       firstDate: firstDate,
-      lastDate: now.add(const Duration(days: 1)),
-      helpText: 'Selecciona una fecha',
+      lastDate: DateTime(now.year, now.month, now.day), // no más que hoy
+      helpText: isFrom ? 'Selecciona fecha inicial' : 'Selecciona fecha final',
       cancelText: 'Cancelar',
       confirmText: 'Aceptar',
     );
 
     if (newDate != null) {
       setState(() {
-        _selectedDate = DateTime(newDate.year, newDate.month, newDate.day);
+        final picked =
+            DateTime(newDate.year, newDate.month, newDate.day); // normalizar
+
+        if (isFrom) {
+          _fromDate = picked;
+          // si la fecha inicial queda mayor que la final, ajustamos la final
+          if (_fromDate.isAfter(_toDate)) {
+            _toDate = _fromDate;
+          }
+        } else {
+          _toDate = picked;
+          // si la fecha final queda menor que la inicial, ajustamos la inicial
+          if (_toDate.isBefore(_fromDate)) {
+            _fromDate = _toDate;
+          }
+        }
       });
+
       await _cargarRegistros();
     }
   }
@@ -306,54 +337,77 @@ class _HistorialEntregasPageState extends State<HistorialEntregasPage> {
     );
   }
 
-Future<void> _descargarImagen(String url) async {
-  try {
-    final uri = Uri.parse(url);
+  Future<void> _descargarImagen(String url) async {
+    try {
+      final uri = Uri.parse(url);
 
-    // Intentar abrir fuera de la app (navegador / visor de imágenes)
-    final bool ok = await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
-    );
+      final bool ok = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
 
-    if (!ok && mounted) {
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir el enlace de descarga.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo abrir el enlace de descarga.'),
-        ),
+        SnackBar(content: Text('Error al intentar descargar: $e')),
       );
     }
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error al intentar descargar: $e')),
-    );
   }
-}
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Historial de paquetes'),
+        title: const Text(
+          'Historial de paquetes',
+          style: TextStyle(color: Colors.white),
+        ),
         backgroundColor: const Color(0xFF1955CC),
+        iconTheme: const IconThemeData(
+          color: Colors.white, // flecha de regresar en blanco
+        ),
       ),
       body: Column(
         children: [
-          // Selector de fecha
+          // Selector de rango de fechas
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
             child: Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _pickDate,
+                    onPressed: () => _pickDate(isFrom: true),
                     icon: const Icon(Icons.calendar_today_outlined),
-                    label: Text('Fecha: $_fechaTextoUi'),
+                    label: Text('Desde: $_fromText'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _pickDate(isFrom: false),
+                    icon: const Icon(Icons.calendar_today_outlined),
+                    label: Text('Hasta: $_toText'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -363,6 +417,22 @@ Future<void> _descargarImagen(String url) async {
               ],
             ),
           ),
+
+          // CONTADOR DE PAQUETES
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Total de paquetes: ${_registros.length}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+          ),
+
           const SizedBox(height: 4),
           Expanded(
             child: RefreshIndicator(
@@ -402,7 +472,7 @@ Future<void> _descargarImagen(String url) async {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'No hay entregas registradas para la fecha $_fechaTextoUi.',
+            'No hay entregas registradas entre $_fromText y $_toText.',
             style: const TextStyle(color: Colors.black54),
           ),
         ],

@@ -14,6 +14,9 @@ import 'login_page.dart' show globalNombre, globalUserId, globalIdCiudad;
 // NUEVO: página de la lista de fila virtual
 import 'fila_virtual_lista_page.dart';
 
+// NUEVO: página para devolver paquete al almacén
+import 'devolver_almacen_scan_page.dart';
+
 class RecogerAlmacenScanPage extends StatefulWidget {
   final String idAlmacen;        // IMPORTANTE: aquí se espera el KEY del nodo de AlmacenPicker
   final String nombreAlmacen;
@@ -135,14 +138,13 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
           setState(() => _seleccionados.insert(0, code));
         }
       } else {
-        // <<<<< CAMBIO: SnackBar con duración máxima de 2 segundos >>>>>
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('El código no pertenece a este almacén.'),
-            duration: const Duration(seconds: 2),
+          const SnackBar(
+            content: Text('El código no pertenece a este almacén.'),
+            duration: Duration(seconds: 2),
           ),
         );
-        // Si no existe en Firebase, desmarcamos para permitir intentarlo nuevamente si fue un error de lectura
+        // Si no existe en Firebase, desmarcamos para permitir intentarlo nuevamente
         _codesProcesados.remove(code);
       }
     } catch (e) {
@@ -219,7 +221,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         'NombreUsuario': (globalNombre ?? '').toString(),
         'Timestamp': ts,
         'YYYYMMDD': ymd,
-        'YYYYMMDDHHMMSS': ymdhms, // según tu requerimiento exacto
+        'YYYYMMDDHHMMSS': ymdhms,
         'idAlmacen': widget.idAlmacen,
         'idCiudad': (globalIdCiudad ?? '').toString(),
         'idUsuario': (globalUserId ?? '').toString(),
@@ -404,7 +406,10 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => FilaVirtualListaPage(idAlmacen: widget.idAlmacen, nombreAlmacen: widget.nombreAlmacen),
+            builder: (_) => FilaVirtualListaPage(
+              idAlmacen: widget.idAlmacen,
+              nombreAlmacen: widget.nombreAlmacen,
+            ),
           ),
         );
         return;
@@ -450,7 +455,6 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       double? almacLng;
 
       if (ubicSnap.exists) {
-        // Usa child() para evitar problemas de casteo a Map<String, dynamic>
         almacLat = _toDoubleLoose(ubicSnap.child('Latitude').value)
                 ?? _toDoubleLoose(ubicSnap.child('latitude').value)
                 ?? _toDoubleLoose(ubicSnap.child('Lat').value)
@@ -481,7 +485,9 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       if (distanceMeters > 50) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Estás a ${distanceMeters.toStringAsFixed(1)} m del almacén. Debes estar a 50 m o menos para unirte.'),
+            content: Text(
+              'Estás a ${distanceMeters.toStringAsFixed(1)} m del almacén. Debes estar a 50 m o menos para unirte.',
+            ),
           ),
         );
         return;
@@ -493,7 +499,6 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         'HoraVinculacion': ahora,
         'NombreDriver': nombre,
         'idDriver': userId,
-        // Extras opcionales por si quieres guardar posición de ingreso:
         'LatitudIngreso': pos.latitude,
         'LongitudIngreso': pos.longitude,
       };
@@ -509,7 +514,10 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => FilaVirtualListaPage(idAlmacen: widget.idAlmacen, nombreAlmacen: widget.nombreAlmacen),
+          builder: (_) => FilaVirtualListaPage(
+            idAlmacen: widget.idAlmacen,
+            nombreAlmacen: widget.nombreAlmacen,
+          ),
         ),
       );
     } catch (e) {
@@ -540,6 +548,20 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
       return false;
     }
     return true;
+  }
+
+  // NUEVO: ir a pantalla de devolver paquete al almacén
+  void _onRegresarAlmacen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DevolverAlmacenScanPage(
+          idAlmacen: widget.idAlmacen,
+          nombreAlmacen: widget.nombreAlmacen,
+          direccionAlmacen: widget.direccionAlmacen,
+        ),
+      ),
+    );
   }
 
   // ===== UI =====
@@ -582,8 +604,11 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                               child: const SizedBox(
                                 width: 36,
                                 height: 36,
-                                child: Icon(Icons.arrow_back_ios_new_rounded,
-                                    size: 18, color: Colors.white),
+                                child: Icon(
+                                  Icons.arrow_back_ios_new_rounded,
+                                  size: 18,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -591,7 +616,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                         const Align(
                           alignment: Alignment.center,
                           child: Text(
-                            'Recolección de paquetes22',
+                            'Recolección de paquetes',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
@@ -659,9 +684,10 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                   Text(
                     widget.nombreAlmacen,
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700),
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -726,7 +752,7 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                       ),
                     )
                   : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 110),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 120),
                       itemCount: _seleccionados.length,
                       itemBuilder: (_, i) {
                         final code = _seleccionados[i];
@@ -734,15 +760,20 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
                           elevation: 1.5,
                           margin: const EdgeInsets.only(bottom: 12),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           child: ListTile(
                             leading: const CircleAvatar(
                               backgroundColor: Color(0xFFEFF3FF),
-                              child: Icon(Icons.inventory_2_outlined,
-                                  color: Color(0xFF1955CC)),
+                              child: Icon(
+                                Icons.inventory_2_outlined,
+                                color: Color(0xFF1955CC),
+                              ),
                             ),
-                            title: Text('Orden\n#$code',
-                                style: const TextStyle(height: 1.2)),
+                            title: Text(
+                              'Orden\n#$code',
+                              style: const TextStyle(height: 1.2),
+                            ),
                             trailing: IconButton(
                               icon: const Icon(Icons.close, color: Colors.red),
                               onPressed: () => _eliminar(code),
@@ -756,80 +787,117 @@ class _RecogerAlmacenScanPageState extends State<RecogerAlmacenScanPage> {
         ),
       ),
 
-      // ===== Botones inferiores =====
-      bottomSheet: SafeArea(
+      // ===== Botones inferiores (siempre visibles) =====
+      bottomNavigationBar: SafeArea(
+        top: false,
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           color: const Color(0xFFF2F3F7),
-          child: Row(
-            children: [
-              // Con Firma
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _onConFirma,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: const BorderSide(color: Color(0xFF2B59F2)),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                // Con Firma
+                SizedBox(
+                  width: 120,
+                  child: OutlinedButton(
+                    onPressed: _onConFirma,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: Color(0xFF2B59F2)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    'Con Firma',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF2B59F2),
+                    child: const Text(
+                      'Con Firma',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2B59F2),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
 
-              // NUEVO: Fila Virtual (estilo Outlined como "Con Firma" pero con borde amarillo)
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _procesandoFilaVirtual ? null : _onFilaVirtual,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: const BorderSide(color: Colors.amber, width: 1.5),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                // Fila Virtual
+                SizedBox(
+                  width: 120,
+                  child: OutlinedButton(
+                    onPressed: _procesandoFilaVirtual ? null : _onFilaVirtual,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: Colors.amber, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      foregroundColor: Colors.amber,
                     ),
-                    foregroundColor: Colors.amber, // color del texto y ripple
-                  ),
-                  child: Text(
-                    _procesandoFilaVirtual ? 'Procesando...' : 'Fila Virtual',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-
-              const SizedBox(width: 8),
-
-              // Finalizar
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _seleccionados.isEmpty || _enviando ? null : _onFinalizar,
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: _seleccionados.isEmpty
-                        ? Colors.black26
-                        : const Color(0xFF2B59F2),
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                    child: Text(
+                      _procesandoFilaVirtual ? 'Procesando...' : 'Fila Virtual',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                  child: const Text(
-                    'Finalizar',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: 8),
+
+                // NUEVO: Regresar almacén
+                SizedBox(
+                  width: 140,
+                  child: OutlinedButton(
+                    onPressed: _onRegresarAlmacen,
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: Colors.redAccent),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      foregroundColor: Colors.redAccent,
+                    ),
+                    child: const Text(
+                      'Regresar almacén',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+
+                // Finalizar
+                SizedBox(
+                  width: 120,
+                  child: ElevatedButton(
+                    onPressed: _seleccionados.isEmpty || _enviando ? null : _onFinalizar,
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: _seleccionados.isEmpty
+                          ? Colors.black26
+                          : const Color(0xFF2B59F2),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Finalizar',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
