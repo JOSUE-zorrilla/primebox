@@ -2,6 +2,9 @@ platform :ios, '13.0'
 
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+# Usar el CDN de CocoaPods (más estable en CI)
+source 'https://cdn.cocoapods.org/'
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,
@@ -35,7 +38,7 @@ end
 post_install do |installer|
   flutter_additional_ios_build_settings(installer)
 
-  # Fix Firebase (non-modular headers)
+  # Fix Firebase (non-modular headers con Xcode 16)
   installer.pods_project.build_configurations.each do |config|
     config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
   end
